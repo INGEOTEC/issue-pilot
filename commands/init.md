@@ -1,6 +1,6 @@
 ---
 description: Configure issue-pilot for this repository, creating .issue-pilot.json
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
 
 Set up issue-pilot for this repository.

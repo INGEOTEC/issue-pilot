@@ -1,7 +1,7 @@
 ---
 description: Implement a list of GitHub issues autonomously and open a single pull request
 argument-hint: <issue numbers, e.g. 165 166 170>
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
 
 Autonomously implement these issues: $ARGUMENTS

@@ -1,7 +1,7 @@
 ---
 description: Turn an idea into a well-formed implementation issue that an autonomous run can execute
 argument-hint: <what you want built> | --update <issue number>
-allowed-tools: Bash, Read, Glob, Grep, WebFetch
+allowed-tools: Bash, Read, Write, Glob, Grep, WebFetch
 ---
 
 Write the implementation issue for: $ARGUMENTS
