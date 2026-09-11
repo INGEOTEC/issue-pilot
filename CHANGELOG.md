@@ -32,13 +32,16 @@ First public release.
 - `scripts/issues_state.py` — run state on disk, so a run survives the clearing
   between issues: plan, the answers gathered up front, per-issue status,
   attempts and commits.
-- `scripts/issues_run.sh` — the driver: one session per issue, retries that
-  continue a dead session rather than restarting it, an explicit distinction
-  between a crash and a declared blocker, and `--detach` so a run outlives
-  whatever started it.
+- `scripts/issues_run.sh` — the driver: one session per issue, addressed by id
+  so other conversations opened in the repository during a run are never picked
+  up by mistake; retries that resume a dead session rather than restarting it;
+  an explicit distinction between a crash and a declared blocker; `--detach` so
+  a run outlives whatever started it; `--plan-only` to read the plan before
+  committing to it; and a `--sync` that refuses to discard unpushed commits.
 - `hooks/usage-guard.sh` — measures every usage window the API reports; waits
   out a window that resets soon, halts the run on one that cannot be waited out
-  (the weekly one).
+  (the weekly one), and once halted refuses an autonomous session's very next
+  tool call while leaving interactive sessions alone.
 - `.issue-pilot.json` — required per-repository configuration (base branch, test
   command, model, effort, attempts), overridable per run from the environment and
   validated before a run may start.

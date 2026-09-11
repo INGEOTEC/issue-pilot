@@ -13,6 +13,7 @@ Subcommands
   next  Prints the next pending issue and whether the conversation must be
         cleared before starting it.  Exits 3 when the run is finished.
   attempt <n>                 Records another attempt on an issue.
+  session <uuid>              Records the conversation the run is currently in.
   done <n> [--commit SHA]     Marks an issue implemented.
   block <n> [--reason TEXT]   Marks an issue blocked; the run stops there.
   unblock [n]  Clears the blocked flag and puts the blocked issue back to
@@ -109,6 +110,7 @@ def cmd_init(args):
         "plan": plan["plan"],
         "status": {str(n): "pending" for n in plan["issues"]},
         "attempts": {str(n): 0 for n in plan["issues"]},
+        "session": None,
         "commits": {},
         "blocked": None,
         "created_at": now(),
@@ -138,6 +140,13 @@ def cmd_next(args):
             return
     print(json.dumps({"finished": True, "blocked": None}, indent=2))
     sys.exit(3)
+
+
+def cmd_session(args):
+    state = load()
+    state["session"] = args.uuid
+    save(state)
+    print(f"session {args.uuid} recorded")
 
 
 def cmd_attempt(args):
@@ -270,6 +279,9 @@ def main():
     p.set_defaults(func=cmd_init)
 
     sub.add_parser("next").set_defaults(func=cmd_next)
+
+    p = sub.add_parser("session"); p.add_argument("uuid")
+    p.set_defaults(func=cmd_session)
 
     p = sub.add_parser("attempt"); p.add_argument("issue", type=int)
     p.set_defaults(func=cmd_attempt)

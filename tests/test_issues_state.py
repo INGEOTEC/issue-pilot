@@ -105,6 +105,12 @@ class RunState(PilotTestCase):
         _, payload = self.next_issue()
         self.assertEqual(payload["issue"], 2)
 
+    def test_the_session_is_recorded(self):
+        self.init()
+        self.assertIsNone(self.state()["session"])
+        self.run_script("issues_state.py", "session", "0f0f0f0f-0000-4000-8000-000000000001")
+        self.assertEqual(self.state()["session"], "0f0f0f0f-0000-4000-8000-000000000001")
+
     def test_attempts_are_counted(self):
         self.init()
         self.run_script("issues_state.py", "attempt", "1")

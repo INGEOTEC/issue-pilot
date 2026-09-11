@@ -80,6 +80,21 @@ class UsageGuard(PilotTestCase):
         self.assertEqual(out.returncode, 0)
         self.assertFalse(self.halt_file.exists())
 
+    def test_a_recorded_halt_stops_an_autonomous_session_at_once(self):
+        # No probe, no five-minute grace: the very next tool call is refused.
+        self.halt_file.write_text("7d window at 95%\n")
+        out = self.guard(code="500", ISSUE_PILOT_RUN="1")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("halted", out.stderr)
+        self.assertIn("--clear", out.stderr)
+
+    def test_a_recorded_halt_leaves_an_interactive_session_alone(self):
+        # A person can read the halt in issues-status and decide; a hook that
+        # locked them out of Claude Code entirely would be worse than no guard.
+        self.halt_file.write_text("7d window at 95%\n")
+        out = self.guard(headers=self.headers(**{"5h": (0.1, 3600)}))
+        self.assertEqual(out.returncode, 0)
+
     def test_clear_forgets_a_halt(self):
         self.guard(headers=self.headers(**{"7d": (0.95, 300000)}))
         self.assertTrue(self.halt_file.exists())

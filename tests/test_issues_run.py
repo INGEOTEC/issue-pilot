@@ -39,17 +39,36 @@ class Run(PilotTestCase):
                          "issues-1-2")
         self.assertEqual(self.state()["base_branch"], "main")
 
+    @staticmethod
+    def session_of(call):
+        """(flag, id) for how a call addressed its conversation."""
+        for flag in ("--session-id", "--resume"):
+            if flag in call:
+                return flag, call[call.index(flag) + 1]
+        return None, None
+
     def test_an_independent_issue_starts_a_fresh_conversation(self):
         self.run_driver("--no-interview", "1", "2", check=True)
         first, second = self.claude_calls()
-        # #1 has no history worth keeping; #2 names #1, so it must keep it.
-        self.assertNotIn("--continue", first)
-        self.assertIn("--continue", second)
+        # #1 has no history worth keeping; #2 names #1, so it must keep it --
+        # by id, never as "the most recent conversation in this directory".
+        self.assertEqual(self.session_of(first)[0], "--session-id")
+        self.assertEqual(self.session_of(second)[0], "--resume")
+        self.assertEqual(self.session_of(first)[1], self.session_of(second)[1])
+        for call in (first, second):
+            self.assertNotIn("--continue", call)
 
     def test_unrelated_issues_each_start_clean(self):
         self.run_driver("--no-interview", "1", "3", check=True)
-        for call in self.claude_calls():
-            self.assertNotIn("--continue", call)
+        first, second = self.claude_calls()
+        self.assertEqual(self.session_of(first)[0], "--session-id")
+        self.assertEqual(self.session_of(second)[0], "--session-id")
+        self.assertNotEqual(self.session_of(first)[1], self.session_of(second)[1])
+
+    def test_the_current_conversation_is_kept_in_the_state(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.assertEqual(self.state()["session"],
+                         self.session_of(self.claude_calls()[0])[1])
 
     def test_every_session_runs_on_the_configured_model(self):
         # Not on whatever model the caller happens to be using.
@@ -75,10 +94,57 @@ class Run(PilotTestCase):
         self.assertEqual(self.claude_calls(), [])
 
     def test_a_dirty_tree_stops_the_run_before_anything_happens(self):
-        (self.repo / "scratch.txt").write_text("uncommitted\n")
+        (self.repo / "README.md").write_text("modified\n")
         out = self.run_driver("--no-interview", "1")
         self.assertEqual(out.returncode, 2)
         self.assertIn("not clean", out.stderr)
+        self.assertIn("README.md", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_untracked_files_count_as_dirty_and_the_way_out_is_named(self):
+        # The run's commits must contain only the run's work; a stray notebook
+        # swept into "implement issue #1" is worse than the stash it costs.
+        (self.repo / "scratch.ipynb").write_text("{}\n")
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("scratch.ipynb", out.stderr)
+        self.assertIn("git stash -u", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_sync_refuses_to_discard_unpushed_commits(self):
+        # setUp committed the configuration locally and never pushed it, so
+        # main is ahead of origin/main: exactly what --sync must not erase.
+        out = self.run_driver("--sync", "--no-interview", "1")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("ahead of origin/main", out.stderr)
+        self.assertIn("configure issue-pilot", out.stderr)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_sync_brings_a_stale_base_up_to_date(self):
+        self._git("push", "-q", "origin", "main")
+        (self.repo / "upstream.txt").write_text("landed on origin\n")
+        self._git("add", "upstream.txt")
+        self._git("commit", "-qm", "upstream change")
+        self._git("push", "-q", "origin", "main")
+        self._git("reset", "-q", "--hard", "HEAD~1")        # now behind by one
+        self.assertNotEqual(self.git("rev-parse", "main"),
+                            self.git("rev-parse", "origin/main"))
+        self.run_driver("--sync", "--no-interview", "1", check=True)
+        # The run branch was cut from origin's main, not the stale local one.
+        self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
+                         self.git("rev-parse", "origin/main"))
+        self.assertEqual(self.state()["status"]["1"], "done")
+
+    def test_plan_only_shows_the_plan_and_touches_nothing(self):
+        out = self.run_driver("--plan-only", "1", "2", "3", check=True)
+        self.assertIn("#1", out.stdout)
+        self.assertIn("fresh conversation", out.stdout)
+        self.assertIn("continues the previous one", out.stdout)
+        self.assertIn("depends on #1", out.stdout)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertEqual(self.git("branch", "--list", "issues-1-2-3"), "")
+        self.assertFalse(list(self.home.glob("state/issues-run-*.json")))
         self.assertEqual(self.claude_calls(), [])
 
     def test_the_answers_gathered_beforehand_reach_the_run(self):
@@ -101,7 +167,9 @@ class Run(PilotTestCase):
                               check=True)
         self.assertEqual(self.state()["status"]["1"], "done")
         self.assertEqual(self.state()["attempts"]["1"], 2)
-        self.assertIn("--continue", self.claude_calls()[1])
+        first, second = self.claude_calls()
+        self.assertEqual(self.session_of(second),
+                         ("--resume", self.session_of(first)[1]))
         self.assertIn("attempt 2/3", out.stdout)
 
     def test_a_declared_blocker_stops_the_run_without_retrying(self):

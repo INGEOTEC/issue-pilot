@@ -59,7 +59,7 @@ cd issue-pilot
 ./install.sh --hook      # --hook also registers the usage guard
 ```
 
-**Requirements:** `git`, `python3` (3.8+, standard library only), the
+**Requirements:** `git`, `python3` (3.9+, standard library only), the
 [GitHub CLI](https://cli.github.com) authenticated (`gh auth login`), `curl`,
 and a `claude` that can start subprocesses of its own — run `claude setup-token`
 once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is
@@ -80,7 +80,7 @@ one per issue.
               run in the background and hands you back the prompt.
               |
       the doing: one issue at a time, unattended.  Fresh conversation when the
-              plan says the issue is independent; --continue when it is not.
+              plan says the issue is independent; resumed when it is not.
               Implement -> test -> commit -> comment -> mark done.
               |
      the close: /issue-pilot:issues-pr  ->  one pull request, Closes #165 #166 #170
@@ -159,6 +159,12 @@ it was started from. You get the branch and a log path back immediately, and
 follow it with `/issue-pilot:issues-status`. Started from a terminal instead, the
 driver can conduct the interview itself; that is the only path that needs a TTY.
 
+**Conversations are addressed by id.** Dependent issues and retries go back to
+the run's own conversation, recorded in the state — never to "the most recent
+conversation in this directory", which during a run is whichever one you opened
+last to look at the status. Opening Claude Code in the repository while a run is
+going is safe.
+
 **The branch.** One branch for the whole run, named from the issue list
 (`issues-165-166-170`), created by the driver before anything else, off your
 configured base branch. Never one branch per issue, and never a pull request per
@@ -169,7 +175,7 @@ issue.
 session that started the run happens to be using.
 
 **Retries.** A session that ends without marking its issue done has almost never
-hit a blocker — it died mid-task. The driver relaunches it with `--continue`, so
+hit a blocker — it died mid-task. The driver resumes that same conversation, so
 it picks up its own context and whatever is already on disk, up to
 `max_attempts` times. It gives up early if two consecutive attempts leave the
 working tree byte-identical: more sessions will not help.
@@ -205,6 +211,11 @@ reading itself:
 | Resets within `USAGE_GUARD_MAX_WAIT` (the 5-hour one) | Sleeps until it resets. The session pauses; the run continues afterwards. |
 | Resets later than that (the weekly one) | Halts: blocks the call, writes a halt file, and the driver stops between issues. |
 
+Once halted, the sessions of an autonomous run are refused at their very next
+tool call rather than five minutes later; an interactive session is left alone,
+so you can still open Claude Code and look. Clear a halt with
+`usage-guard.sh --clear`.
+
 It must never break a session by accident, so any failure — no network, expired
 token, an unexpected payload — lets the tool call through.
 
@@ -222,8 +233,6 @@ See it yourself at any time:
 | `USAGE_GUARD_INTERVAL` | `300` | Seconds between real measurements. |
 | `USAGE_GUARD_MAX_WAIT` | `21600` | Longest single sleep, and the line between a short and a long window. |
 | `USAGE_GUARD_MODEL` | `claude-haiku-4-5-20251001` | Model used for the probe. |
-
-Clear a halt with `usage-guard.sh --clear`.
 
 ## Configuration
 
@@ -270,6 +279,7 @@ scripts/issues_run.sh --sync 165 166 170        # interview here, then run
 scripts/issues_run.sh --notes-file notes.txt 165  # answers gathered elsewhere
 scripts/issues_run.sh --no-interview 165          # no questions at all
 scripts/issues_run.sh --detach --no-interview 165 # run in the background
+scripts/issues_run.sh --plan-only 165 166 170     # show the plan, touch nothing
 scripts/issues_run.sh --pr 165 166                # open the pull request too
 scripts/issues_run.sh --resume                    # retry the blocked issue
 ```

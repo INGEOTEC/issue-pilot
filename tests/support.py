@@ -42,6 +42,13 @@ class PilotTestCase(unittest.TestCase):
         # Pin the branch name, so the fake `gh` can agree about the base branch
         # however old the git on this machine is.
         self._git("branch", "-m", "main")
+        # A bare `origin`, so --sync has something to fetch from and reset to.
+        self.origin = root / "origin.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(self.repo), str(self.origin)],
+                       check=True, capture_output=True)
+        self._git("remote", "add", "origin", str(self.origin))
+        self._git("fetch", "-q", "origin")
+        self._git("branch", "-u", "origin/main", "main")
 
         self.bindir = root / "bin"
         self.bindir.mkdir()

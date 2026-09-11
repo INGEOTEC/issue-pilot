@@ -63,6 +63,22 @@ log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 
 now=$(date +%s)
 
+# A halt already on record is final for the sessions of an autonomous run: they
+# stop at the very next tool call, before spending another five minutes of a
+# window that is nearly gone.  An interactive session is left alone -- a person
+# can see the halt in /issue-pilot:issues-status and decide for themselves.  The
+# run driver marks its sessions with ISSUE_PILOT_RUN.
+if [ "$MODE" = hook ] && [ -n "${ISSUE_PILOT_RUN:-}" ] && [ -r "$HALT" ]; then
+  cat >&2 <<MSG
+issue-pilot usage guard: this run is halted -- $(cat "$HALT")
+
+Stop working on this issue now. Do not retry, do not try other tools: every
+call will be refused until the window resets and the halt is cleared with
+$0 --clear
+MSG
+  exit 2
+fi
+
 if [ "$MODE" = hook ]; then
   last=$(cat "$STATE" 2>/dev/null || echo 0)
   case "$last" in ''|*[!0-9]*) last=0 ;; esac

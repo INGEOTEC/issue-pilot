@@ -10,7 +10,10 @@
 #
 # The clearing is not a decision the model makes: issues_plan.py computes the
 # dependencies, and this script either starts a brand-new `claude` session
-# (equivalent to /clear) or resumes the previous one with --continue.
+# (equivalent to /clear) or resumes the previous one.  Sessions are addressed
+# by id, never as "the most recent conversation in this directory": a run takes
+# hours, and the person who started it will open other sessions in the same
+# repository meanwhile -- to look at the run's status, if nothing else.
 #
 # The branch is derived from the issue list (`issues-165-166`) and created by
 # this script, before phase 1, off the configured base branch.
@@ -29,6 +32,7 @@
 #   issues_run.sh --no-interview 165 166                      # no phase 1 at all
 #   issues_run.sh --detach --notes-file notes.txt 165 166     # run in the background
 #   issues_run.sh --pr 165 166          # also open the pull request at the end
+#   issues_run.sh --plan-only 165 166   # show which issues would share a conversation
 #   issues_run.sh --resume              # continue, retrying a blocked issue once
 set -euo pipefail
 
@@ -44,7 +48,7 @@ cfg() { python3 "$CONFIG" get "$1" 2>/dev/null || true; }
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 ORIG_ARGS=("$@")
 
-NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; SYNC=0; OPEN_PR=0; DETACH=0
+NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; SYNC=0; OPEN_PR=0; DETACH=0; PLAN_ONLY=0
 MAX_ATTEMPTS="$(cfg max_attempts)"; MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
 # Every `claude` this driver launches runs on the same model and effort level,
@@ -66,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --no-interview) INTERVIEW=0; shift;;
     --sync)   SYNC=1;      shift;;
     --pr)     OPEN_PR=1;   shift;;
+    --plan-only) PLAN_ONLY=1; shift;;  # print the plan, touch nothing
     --max-attempts) MAX_ATTEMPTS="$2"; shift 2;;
     -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0"; exit 0;;
     -*) echo "unknown option: $1" >&2; exit 2;;
@@ -114,6 +119,11 @@ MSG
   exit 78
 fi
 
+# Every `claude` this driver launches, and every hook inside it, can see this.
+# The usage guard uses it to tell an autonomous session from an interactive one
+# when it has to decide how hard to stop.
+export ISSUE_PILOT_RUN=1
+
 # ------------------------------------------------- the rule that keeps a run alive
 # Both observed failures of this driver were the same one: the model started a
 # long job with run_in_background and then ENDED ITS TURN to wait for the
@@ -150,6 +160,27 @@ polish, so that an unexpected death does not take finished work with it.
 RULES
 )
 
+# The run commits as it goes, so anything already in the tree -- modified or
+# untracked -- would end up inside its commits, attributed to an issue it has
+# nothing to do with.  Untracked files are refused too, on purpose: the
+# guarantee that a run's commits contain only the run's work is worth more than
+# the `git stash -u` it costs.
+require_clean_tree() {
+  local dirty
+  dirty="$(git status --porcelain)"
+  [[ -z "$dirty" ]] && return 0
+  cat >&2 <<MSG
+error: the working tree is not clean; the run would sweep this into its commits:
+
+$(sed 's/^/    /' <<<"$dirty")
+
+  Commit it, or set it aside for the duration of the run:
+    git stash -u          # everything, untracked files included
+    git stash pop         # afterwards
+MSG
+  exit 2
+}
+
 # ----------------------------------------------------- which branch this run is
 # Resolved before anything is touched, because --detach needs to say where the
 # log will be without having done any work yet.
@@ -158,6 +189,26 @@ if [[ $RESUME -eq 1 ]]; then
 else
   [[ ${#ARGS[@]} -gt 0 ]] || { echo "usage: issues_run.sh [--sync] [--detach] [--no-interview] [--pr] <issue>..." >&2; exit 2; }
   BRANCH="$(python3 "$CONFIG" branch-name "${ARGS[@]}")"
+fi
+
+# --------------------------------------------------------------- plan only
+# The one decision this tool takes away from the model, shown before anything
+# is created, so it can be read -- and disagreed with -- for free.
+if [[ $PLAN_ONLY -eq 1 ]]; then
+  [[ $RESUME -eq 0 ]] || { echo "error: --plan-only makes no sense with --resume; use issues_state.py status." >&2; exit 2; }
+  plan=("$SCRIPTS/issues_plan.py" "${ARGS[@]}")
+  [[ -n "$REPO" ]] && plan+=(--repo "$REPO")
+  python3 "${plan[@]}" | python3 -c '
+import json, sys
+plan = json.load(sys.stdin)["plan"]
+print("branch: '"$BRANCH"'")
+for i in plan:
+    deps = ", ".join("#%s" % x for x in i["depends_on"]) or "-"
+    how = "fresh conversation" if i["clear_before"] else "continues the previous one"
+    print("  #%-6s %-28s depends on %s" % (i["issue"], how, deps))
+    print("          %s" % i["title"])
+'
+  exit 0
 fi
 
 LOGDIR="$PILOT_HOME/logs/$BRANCH"
@@ -179,11 +230,7 @@ MSG
   fi
   # Cheap checks belong to the parent: a mistake this obvious should be visible
   # straight away, not buried in a log the caller has not read yet.
-  if [[ $RESUME -eq 0 && -n "$(git status --porcelain)" ]]; then
-    echo "error: the working tree is not clean; commit or stash first:" >&2
-    git status --short >&2
-    exit 2
-  fi
+  [[ $RESUME -eq 1 ]] || require_clean_tree
   if [[ -n "$NOTES_FILE" && ! -s "$NOTES_FILE" ]]; then
     echo "error: --notes-file $NOTES_FILE is missing or empty." >&2
     exit 2
@@ -227,19 +274,29 @@ fi
 
 # --------------------------------------------------------------- phase 0: branch
 if [[ $RESUME -eq 0 ]]; then
-  # Never start on top of somebody's uncommitted work: the run commits as it
-  # goes, and those changes would end up inside its commits.
-  if [[ -n "$(git status --porcelain)" ]]; then
-    echo "error: the working tree is not clean; commit or stash first:" >&2
-    git status --short >&2
-    exit 2
-  fi
+  require_clean_tree
 
   BASE="$(python3 "$CONFIG" base-branch)"
   if [[ $SYNC -eq 1 ]]; then
     echo "syncing $BASE with origin"
-    git checkout "$BASE"
     git fetch origin
+    # `reset --hard` to origin discards whatever origin does not have.  Behind
+    # is what --sync is for; ahead means unpushed commits, and losing those
+    # silently is the one thing a convenience flag must never do.
+    if git show-ref --verify --quiet "refs/heads/$BASE"; then
+      ahead="$(git rev-list --count "origin/$BASE..$BASE")"
+      if (( ahead > 0 )); then
+        cat >&2 <<MSG
+error: local $BASE is $ahead commit(s) ahead of origin/$BASE; --sync would discard them:
+
+$(git log --oneline "origin/$BASE..$BASE" | sed 's/^/    /')
+
+  Push them first, or start without --sync from where you are.
+MSG
+        exit 2
+      fi
+    fi
+    git checkout "$BASE"
     git reset --hard "origin/$BASE"
   elif [[ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]]; then
     echo "note: HEAD is $(git rev-parse --abbrev-ref HEAD), not the base branch $BASE;" >&2
@@ -342,6 +399,19 @@ status_of() {  # status_of <issue>
 # can be told apart from one that made progress but ran out of session.
 fingerprint() { echo "$(git rev-parse HEAD) $(git status --porcelain | md5sum)"; }
 
+# The conversation a dependent issue or a retry goes back to.  Kept in the state
+# and addressed by id: `--continue` would mean "the most recent conversation in
+# this directory", and during a run that is whichever one the user opened last.
+current_session() {
+  python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session") or "")'
+}
+new_session() {
+  local sid
+  sid="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+  python3 "$STATE" session "$sid" >/dev/null
+  echo "$sid"
+}
+
 # A usage window that cannot be waited out is the one thing that should stop a
 # run between issues rather than in the middle of one.
 check_usage() {
@@ -371,7 +441,7 @@ while next_json=$(python3 "$STATE" next); do
     else
       # A session that exits with the issue still pending has almost always
       # ended its turn while work was in flight, not hit a real blocker: the
-      # code is usually written, green and uncommitted.  Continuing the same
+      # code is usually written, green and uncommitted.  Resuming the same
       # conversation picks it up with all of that context intact.
       prompt=$(cat <<EOF
 The previous session on issue #$issue ended WITHOUT marking it done and without
@@ -394,17 +464,26 @@ EOF
 )
     fi
 
+    # A fresh conversation gets a new id; anything else goes back to the one
+    # the run is in.  A run recorded before sessions were tracked, or resumed
+    # into an empty state, simply starts one.
+    if [[ $attempt -eq 1 && "$clear" == "True" ]]; then
+      session_args=(--session-id "$(new_session)")
+    else
+      sid="$(current_session)"
+      if [[ -n "$sid" ]]; then
+        session_args=(--resume "$sid")
+      else
+        session_args=(--session-id "$(new_session)")
+      fi
+    fi
+
     # No `|| true`: keep the exit code, and keep a log, so a dead run can be
     # read afterwards instead of guessed at.
     rc=0
-    if [[ $attempt -eq 1 && "$clear" == "True" ]]; then
-      claude -p "$prompt" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits \
-        --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$log" || rc=$?
-    else
-      claude -p "$prompt" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits --continue \
-        --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$log" || rc=$?
-    fi
-    echo "--- claude exited with status $rc" | tee -a "$log"
+    claude -p "$prompt" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits "${session_args[@]}" \
+      --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$log" || rc=$?
+    echo "--- claude exited with status $rc (session ${session_args[1]})" | tee -a "$log"
 
     status="$(status_of "$issue")"
     [[ "$status" == "done" ]] && break
@@ -451,7 +530,9 @@ done
 
 if [[ $OPEN_PR -eq 1 ]]; then
   echo "=== opening the pull request ==="
+  # The pull request needs the state and the git log, not anybody's context.
   claude -p "/issue-pilot:issues-pr" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits \
+    --session-id "$(new_session)" \
     --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$LOGDIR/pull-request.log"
 else
   echo "all issues implemented; open the pull request with: /issue-pilot:issues-pr"

@@ -33,6 +33,14 @@ Close the issue-pilot run by opening **one single** pull request.
 
    🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
+   If the repository has a pull request template
+   (`.github/PULL_REQUEST_TEMPLATE.md`, or `PULL_REQUEST_TEMPLATE.md` at the
+   root or under `docs/`), the body follows **its** structure, with the sections
+   above fitted into it. Tick only the checklist items that are actually true
+   for this run — an unchecked box the reviewer has to ask about is better than a
+   ticked one that was not verified — and say in the body which ones you checked
+   and how.
+
    Pass `--draft` if `pr_draft` is true in the project's configuration. Write the
    body to a temporary file rather than passing it inline: bodies with backticks
    and newlines do not survive shell quoting.

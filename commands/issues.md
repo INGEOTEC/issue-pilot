@@ -31,8 +31,11 @@ goes quietly wrong.
 git status --porcelain      # must be empty
 ```
 
-A run commits as it goes, so anybody's uncommitted work would end up inside its
-commits. If the tree is dirty, **stop and report it**; do not discard changes.
+A run commits as it goes, so anything already in the tree — modified **or
+untracked** — would end up inside its commits, attributed to an issue it has
+nothing to do with. If the tree is dirty, **stop and report it**, listing the
+files; suggest `git stash -u` (and `git stash pop` afterwards) for work that is
+merely in progress. Do not discard or stash anything yourself.
 
 ## 2. Read every issue
 
@@ -114,7 +117,9 @@ anything yourself.
   computed by `scripts/issues_plan.py` (an issue depends on an earlier one in
   the list when either mentions the other — `#N` or its URL — in title, body or
   comments), and applied by the driver: a fresh `claude` process for the
-  independent ones, `--continue` for the dependent ones. For each issue it
+  independent ones, resuming the run's own conversation by id for the dependent
+  ones — never "the most recent conversation in this directory", which during a
+  run is whichever one you opened last. For each issue it
   invokes `/issue-pilot:issues-one <n>`, which implements, tests, commits and
   comments on the issue. It only moves on when the issue is `done`.
 
@@ -125,9 +130,9 @@ anything yourself.
 - **Retries.** A session that ends without marking the issue has almost never hit
   a real blocker: it died mid-task, typically by ending its turn to wait for a
   background process (under `claude -p` that ends the process and kills that
-  work). The driver relaunches it with `--continue` and a note to pick up what is
-  already there, up to 3 attempts (`--max-attempts N`), giving up earlier if two
-  consecutive attempts change absolutely nothing.
+  work). The driver resumes that same conversation with a note to pick up what
+  is already there, up to 3 attempts (`--max-attempts N`), giving up earlier if
+  two consecutive attempts change absolutely nothing.
 
 - **Explicit blocking.** If a session calls `issues_state.py block`, that *is* an
   answer: the driver stops there without retrying, leaves the commits of the
@@ -141,6 +146,13 @@ anything yourself.
   `$ISSUE_PILOT_HOME/logs/<branch>/driver.log`, and every attempt is saved whole
   to `issue-<n>-attempt-<k>.log` next to it, with `claude`'s exit status at the
   end. Those are the first things to read when a run ends badly.
+
+To see the plan without starting anything — which issues will share a
+conversation, and why:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --plan-only $ARGUMENTS
+```
 
 Inspect or resume, at any time:
 
