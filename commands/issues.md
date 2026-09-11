@@ -37,7 +37,7 @@ nothing to do with. If the tree is dirty, **stop and report it**, listing the
 files; suggest `git stash -u` (and `git stash pop` afterwards) for work that is
 merely in progress. Do not discard or stash anything yourself.
 
-## 2. Read every issue
+## 2. Read every issue, against the code the run will start from
 
 All of them, start to finish, in the order given:
 
@@ -45,10 +45,18 @@ All of them, start to finish, in the order given:
 gh issue view <n> --comments
 ```
 
-Then read `CLAUDE.md` and enough of the code each issue touches to know whether
-it is implementable as written. Not just the first issue: a contradiction
-between the third and the fifth is exactly the kind of thing that has to surface
-now.
+Then the code — but not the working tree, which may be on a feature branch or
+behind origin. The run itself will start from the tip of the base branch on
+origin, so that is what the issues have to be read against:
+
+```bash
+BASE_TREE="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" add)"
+```
+
+Read `CLAUDE.md` and enough of the code each issue touches, **under
+`$BASE_TREE`**, to know whether it is implementable as written. Not just the
+first issue: a contradiction between the third and the fifth is exactly the kind
+of thing that has to surface now. If the fetch fails, stop and say so.
 
 ## 3. Ask everything, once
 
@@ -78,7 +86,8 @@ point applies to, how long the slow steps take, and — explicitly — what must
 ## 5. Start the run
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --sync --detach --notes-file "$NOTES" $ARGUMENTS
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" remove
+"${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --detach --notes-file "$NOTES" $ARGUMENTS
 ```
 
 `--detach` puts the run in a session of its own and returns immediately. It has
@@ -86,10 +95,11 @@ to: a run takes hours, far longer than any tool call, and a run tied to this
 conversation would die with it. The command prints the branch and the driver's
 log path.
 
-`--sync` resets the base branch to `origin` before cutting the run branch; drop
-it to start from whatever is checked out. The base branch comes from
-`.issue-pilot.json` or from the repository's default branch on GitHub — do not
-guess it yourself.
+The driver fetches and cuts the run branch from `origin/<base>` — always, and
+without touching the local base branch or whatever is checked out. The base
+branch comes from `.issue-pilot.json` or from the repository's default branch on
+GitHub; do not guess it yourself, and do not pass `--from-head` unless the user
+explicitly asks to start from the local checkout.
 
 ## 6. Report
 
@@ -108,9 +118,11 @@ anything yourself.
   your shell rc, else `~/.claude/.credentials.json`. With none of those it exits
   78 before starting rather than failing half-way through.
 
-- **The branch.** Derived from the issue list (`issues-165-166-170`) and created
-  by the driver before anything else. One branch for the whole run, not one per
-  issue.
+- **The branch.** Derived from the issue list (`issues-165-166-170`) and cut by
+  the driver, before anything else, from the tip of the base branch on origin —
+  fetched first, every time. The local base branch is left alone; if it is ahead
+  of origin, the driver says which commits the run will not include. One branch
+  for the whole run, not one per issue.
 
 - **One issue at a time.** Each issue that does **not** depend on those already
   implemented starts with a clean conversation. Which issue is independent is

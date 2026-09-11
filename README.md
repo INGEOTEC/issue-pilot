@@ -170,10 +170,19 @@ conversation in this directory", which during a run is whichever one you opened
 last to look at the status. Opening Claude Code in the repository while a run is
 going is safe.
 
-**The branch.** One branch for the whole run, named from the issue list
-(`issues-165-166-170`), created by the driver before anything else, off your
-configured base branch. Never one branch per issue, and never a pull request per
-issue.
+**The branch starts from origin, always.** One branch for the whole run, named
+from the issue list (`issues-165-166-170`), cut by the driver before anything
+else from the tip of the base branch **as it is on origin** — fetched first,
+every time. Whatever you have checked out, and wherever your local base branch
+is, does not come into it, and neither is touched; if your local base is ahead
+of origin, the driver lists the commits the run will not include. `--from-head`
+is the deliberate exception. Never one branch per issue, and never a pull
+request per issue.
+
+**Planning reads from origin too.** `/issue-pilot:issue-plan`, and the questions
+`/issue-pilot:issues` asks before a run, read the code in a separate worktree of
+`origin/<base>`, not in your working tree — which is usually on a feature branch
+of its own while you plan the next thing.
 
 **The model.** Every autonomous session runs on the model and effort level in
 `.issue-pilot.json` (`sonnet` and `high` by default), never on whatever the
@@ -280,7 +289,8 @@ Every setting can be overridden for a single run by an environment variable
 The driver underneath, for the times you want it directly:
 
 ```bash
-scripts/issues_run.sh --sync 165 166 170        # interview here, then run
+scripts/issues_run.sh 165 166 170                 # interview here, then run
+scripts/issues_run.sh --from-head 165             # cut the branch from HEAD, not origin
 scripts/issues_run.sh --notes-file notes.txt 165  # answers gathered elsewhere
 scripts/issues_run.sh --no-interview 165          # no questions at all
 scripts/issues_run.sh --detach --no-interview 165 # run in the background
@@ -289,8 +299,10 @@ scripts/issues_run.sh --pr 165 166                # open the pull request too
 scripts/issues_run.sh --resume                    # retry the blocked issue
 ```
 
-Run from your own terminal with no `--notes`, the driver conducts the interview
-itself in an interactive `claude` session. `--detach` cannot: it has nobody to
+The driver fetches and cuts the run branch from `origin/<base>` unless told
+`--from-head`; it never resets your local branches. Run from your own terminal
+with no `--notes`, it conducts the interview itself in an interactive `claude`
+session. `--detach` cannot: it has nobody to
 ask, so it requires the answers up front or none at all.
 
 ## Closing the issues

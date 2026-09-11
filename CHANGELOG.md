@@ -37,7 +37,12 @@ First public release.
   up by mistake; retries that resume a dead session rather than restarting it;
   an explicit distinction between a crash and a declared blocker; `--detach` so
   a run outlives whatever started it; `--plan-only` to read the plan before
-  committing to it; and a `--sync` that refuses to discard unpushed commits.
+  committing to it; and a run branch that is always cut from the tip of the base
+  branch on origin, fetched first, without touching any local branch
+  (`--from-head` to opt out).
+- `scripts/base_worktree.sh` — a worktree of `origin/<base>` that the planning
+  commands read code from, so a plan is written against the code the work will
+  land on and not against whatever is checked out.
 - `hooks/usage-guard.sh` — measures every usage window the API reports; waits
   out a window that resets soon, halts the run on one that cannot be waited out
   (the weekly one), and once halted refuses an autonomous session's very next

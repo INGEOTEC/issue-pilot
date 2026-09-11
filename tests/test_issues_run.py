@@ -19,6 +19,7 @@ class Run(PilotTestCase):
                            2: issue(2, "second", body="builds on #1"),
                            3: issue(3, "third")})
         self.write_config({"test_command": "true"})
+        self._git("push", "-q", "origin", "main")
 
     def plan(self, *actions):
         return {"FAKE_CLAUDE_PLAN": json.dumps(list(actions))}
@@ -111,30 +112,69 @@ class Run(PilotTestCase):
         self.assertIn("git stash -u", out.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_sync_refuses_to_discard_unpushed_commits(self):
-        # setUp committed the configuration locally and never pushed it, so
-        # main is ahead of origin/main: exactly what --sync must not erase.
-        out = self.run_driver("--sync", "--no-interview", "1")
-        self.assertEqual(out.returncode, 2)
-        self.assertIn("ahead of origin/main", out.stderr)
-        self.assertIn("configure issue-pilot", out.stderr)
-        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
-        self.assertEqual(self.claude_calls(), [])
+    def land_on_origin(self, name):
+        """A commit on origin/main that the local clone does not have."""
+        import pathlib, subprocess
+        other = pathlib.Path(self.tmp.name) / ("other-" + name)
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)],
+                       check=True, capture_output=True)
+        (other / name).write_text("landed on origin\n")
+        for cmd in (["git", "-c", "user.email=o@x", "-c", "user.name=o", "add", name],
+                    ["git", "-c", "user.email=o@x", "-c", "user.name=o", "commit", "-qm", name],
+                    ["git", "push", "-q", "origin", "HEAD:main"]):
+            subprocess.run(cmd, cwd=other, check=True, capture_output=True)
 
-    def test_sync_brings_a_stale_base_up_to_date(self):
+    def test_the_run_branch_is_cut_from_origin_not_from_the_local_base(self):
         self._git("push", "-q", "origin", "main")
-        (self.repo / "upstream.txt").write_text("landed on origin\n")
-        self._git("add", "upstream.txt")
-        self._git("commit", "-qm", "upstream change")
-        self._git("push", "-q", "origin", "main")
-        self._git("reset", "-q", "--hard", "HEAD~1")        # now behind by one
-        self.assertNotEqual(self.git("rev-parse", "main"),
-                            self.git("rev-parse", "origin/main"))
-        self.run_driver("--sync", "--no-interview", "1", check=True)
-        # The run branch was cut from origin's main, not the stale local one.
+        self.land_on_origin("upstream.txt")               # local main is now stale
+        self.run_driver("--no-interview", "1", check=True)
+        self.assertTrue((self.repo / "upstream.txt").exists())
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
-        self.assertEqual(self.state()["status"]["1"], "done")
+        # The local base branch was not touched to get there.
+        self.assertNotEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
+
+    def test_the_run_starts_from_origin_even_when_checked_out_elsewhere(self):
+        self._git("push", "-q", "origin", "main")
+        self._git("checkout", "-q", "-b", "feat/elsewhere")
+        (self.repo / "elsewhere.txt").write_text("feature work\n")
+        self._git("add", "elsewhere.txt")
+        self._git("commit", "-qm", "feature work")
+        self.run_driver("--no-interview", "1", check=True)
+        self.assertFalse((self.repo / "elsewhere.txt").exists())
+        self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
+                         self.git("rev-parse", "origin/main"))
+
+    def test_unpushed_commits_on_the_base_are_reported_and_left_out(self):
+        # setUp committed the configuration locally and never pushed it.  The
+        # run must neither include it silently nor destroy it -- and .issue-pilot.json
+        # has to exist on origin for the run to be allowed to start at all.
+        self._git("push", "-q", "origin", "main")
+        (self.repo / "unpushed.txt").write_text("not on origin\n")
+        self._git("add", "unpushed.txt")
+        self._git("commit", "-qm", "unpushed work")
+        out = self.run_driver("--no-interview", "1", check=True)
+        self.assertIn("ahead of origin/main", out.stderr)
+        self.assertIn("unpushed work", out.stderr)
+        self.assertFalse((self.repo / "unpushed.txt").exists())
+        self.assertEqual(self.git("rev-list", "--count", "origin/main..main"), "1")
+
+    def test_from_head_is_the_deliberate_exception(self):
+        self._git("push", "-q", "origin", "main")
+        (self.repo / "unpushed.txt").write_text("not on origin\n")
+        self._git("add", "unpushed.txt")
+        self._git("commit", "-qm", "unpushed work")
+        out = self.run_driver("--from-head", "--no-interview", "1", check=True)
+        self.assertIn("off HEAD", out.stdout)
+        self.assertTrue((self.repo / "unpushed.txt").exists())
+
+    def test_an_unreachable_origin_stops_the_run_instead_of_guessing(self):
+        self._git("remote", "set-url", "origin", str(self.repo.parent / "gone.git"))
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("could not fetch origin/main", out.stderr)
+        self.assertIn("--from-head", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
 
     def test_plan_only_shows_the_plan_and_touches_nothing(self):
         out = self.run_driver("--plan-only", "1", "2", "3", check=True)

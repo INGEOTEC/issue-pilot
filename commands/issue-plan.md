@@ -25,10 +25,26 @@ nothing else. Everything below depends on knowing what this project's tests are
 and which branch runs start from, and guessing either is how an unattended run
 goes quietly wrong.
 
-## 1. Read before you ask
+## 1. Read the code where the work will land
+
+Not the working tree. It may be on a feature branch, behind origin, or in the
+middle of something else, and a plan written against that is a plan for the
+wrong codebase. Check out the tip of the base branch **as it is on origin** in a
+worktree of its own:
+
+```bash
+BASE_TREE="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" add)"
+```
+
+That fetches first, every time, and prints a path outside the repository. Read
+`CLAUDE.md`, the code and the tests **under `$BASE_TREE`**, not under the
+current directory. If it fails because origin is unreachable, stop and say so:
+do not fall back to whatever is checked out.
+
+## 2. Read before you ask
 
 Explore first, so your questions are about decisions and not about facts you
-could have looked up:
+could have looked up — all of it under `$BASE_TREE`:
 
 - `CLAUDE.md` and the project's conventions (tests, layout, style, base branch).
 - The code the change touches: where it would live, what already does something
@@ -37,7 +53,7 @@ could have looked up:
 - `.issue-pilot.json`, for the test command and base branch the issue must
   name.
 
-## 2. Ask everything, once
+## 3. Ask everything, once
 
 Put **all** your open questions into a single `AskUserQuestion` batch. What
 counts as a question: where two readings lead to materially different work, a
@@ -54,7 +70,7 @@ Ask as well, when they are not already obvious:
   sweeps), roughly how long it takes, and how to tell it finished. An autonomous
   session that does not know this is the single most common way a run dies.
 
-## 3. Write the issue
+## 4. Write the issue
 
 One issue = one coherent piece of work with its own commit and its own tests.
 Use exactly these sections; the autonomous session reads them in this order:
@@ -92,7 +108,7 @@ reading, because that will force them into the same conversation and spend
 context on it. Say which it is in the text: "builds on #12" versus "see #12 for
 history".
 
-## 4. Create it
+## 5. Create it
 
 ```bash
 gh issue create --title '<imperative, specific, under ~70 chars>' --body-file <file>
@@ -105,7 +121,7 @@ inline: bodies with backticks and newlines do not survive shell quoting.
 If the work was split, create the issues in dependency order and cross-reference
 them as described above.
 
-## 5. Report
+## 6. Report
 
 Print the issue URLs and the exact command to implement them:
 
@@ -116,5 +132,11 @@ Print the issue URLs and the exact command to implement them:
 Also say, in one line each, which questions you decided yourself and what the
 defaults were — the user should be able to catch a wrong default here, before a
 run spends an hour on it.
+
+Finally, drop the worktree:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" remove
+```
 
 Do not implement anything and do not touch the working tree.

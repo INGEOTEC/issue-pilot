@@ -16,7 +16,11 @@
 # repository meanwhile -- to look at the run's status, if nothing else.
 #
 # The branch is derived from the issue list (`issues-165-166`) and created by
-# this script, before phase 1, off the configured base branch.
+# this script, before anything else, off the tip of the base branch AS IT IS ON
+# ORIGIN -- fetched first, every time.  Whatever is checked out locally, and
+# whatever the local base branch is at, does not come into it: the run has to
+# start from what everybody else has, and the local base branch is nobody's to
+# reset.  --from-head is the deliberate exception.
 #
 # A run outlives any single command, so it can also be started detached: with
 # --detach the driver relaunches itself in its own session, prints where its log
@@ -25,8 +29,8 @@
 # interview, so it needs the answers up front (--notes-file / --notes) or none at
 # all (--no-interview).
 #
-#   issues_run.sh 165 166 170
-#   issues_run.sh --sync 165 166        # reset the base branch to origin first
+#   issues_run.sh 165 166 170           # branch cut from origin/<base>, always fetched first
+#   issues_run.sh --from-head 165 166   # cut it from HEAD instead (offline, or on purpose)
 #   issues_run.sh --notes "answers agreed elsewhere" 165 166  # skips phase 1
 #   issues_run.sh --notes-file notes.txt 165 166              # the same, from a file
 #   issues_run.sh --no-interview 165 166                      # no phase 1 at all
@@ -48,7 +52,7 @@ cfg() { python3 "$CONFIG" get "$1" 2>/dev/null || true; }
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 ORIG_ARGS=("$@")
 
-NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; SYNC=0; OPEN_PR=0; DETACH=0; PLAN_ONLY=0
+NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; FROM_HEAD=0; OPEN_PR=0; DETACH=0; PLAN_ONLY=0
 MAX_ATTEMPTS="$(cfg max_attempts)"; MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
 # Every `claude` this driver launches runs on the same model and effort level,
@@ -68,7 +72,8 @@ while [[ $# -gt 0 ]]; do
     --repo)   REPO="$2";   shift 2;;
     --resume) RESUME=1;    shift;;      # continue a run, retrying if blocked
     --no-interview) INTERVIEW=0; shift;;
-    --sync)   SYNC=1;      shift;;
+    --from-head) FROM_HEAD=1; shift;;   # cut the run branch from HEAD, not origin
+    --sync)   shift;;                    # accepted for old habits: it is now the default
     --pr)     OPEN_PR=1;   shift;;
     --plan-only) PLAN_ONLY=1; shift;;  # print the plan, touch nothing
     --max-attempts) MAX_ATTEMPTS="$2"; shift 2;;
@@ -187,7 +192,7 @@ MSG
 if [[ $RESUME -eq 1 ]]; then
   BRANCH="$(python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin)["branch"])')"
 else
-  [[ ${#ARGS[@]} -gt 0 ]] || { echo "usage: issues_run.sh [--sync] [--detach] [--no-interview] [--pr] <issue>..." >&2; exit 2; }
+  [[ ${#ARGS[@]} -gt 0 ]] || { echo "usage: issues_run.sh [--from-head] [--detach] [--no-interview] [--pr] <issue>..." >&2; exit 2; }
   BRANCH="$(python3 "$CONFIG" branch-name "${ARGS[@]}")"
 fi
 
@@ -277,41 +282,39 @@ if [[ $RESUME -eq 0 ]]; then
   require_clean_tree
 
   BASE="$(python3 "$CONFIG" base-branch)"
-  if [[ $SYNC -eq 1 ]]; then
-    echo "syncing $BASE with origin"
-    git fetch origin
-    # `reset --hard` to origin discards whatever origin does not have.  Behind
-    # is what --sync is for; ahead means unpushed commits, and losing those
-    # silently is the one thing a convenience flag must never do.
+
+  if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    # A rerun over the same issues picks the existing branch up as it is;
+    # starting it over is a decision for a person, made with `git branch -D`.
+    echo "branch $BRANCH already exists; checking it out"
+    git checkout "$BRANCH"
+  elif [[ $FROM_HEAD -eq 1 ]]; then
+    echo "creating branch $BRANCH off HEAD ($(git rev-parse --abbrev-ref HEAD)) as asked"
+    git checkout -b "$BRANCH"
+  else
+    echo "fetching origin/$BASE"
+    git fetch --quiet origin "$BASE" || {
+      echo "error: could not fetch origin/$BASE. The run starts from origin, not from what is checked out;" >&2
+      echo "       fix the network or the remote, or pass --from-head to start from HEAD on purpose." >&2
+      exit 1
+    }
+    # The local base branch is left exactly as it was.  If it is ahead of
+    # origin, say so: those commits are somebody's unpushed work and this run
+    # will not include them, which is either what they want or a surprise.
     if git show-ref --verify --quiet "refs/heads/$BASE"; then
       ahead="$(git rev-list --count "origin/$BASE..$BASE")"
       if (( ahead > 0 )); then
         cat >&2 <<MSG
-error: local $BASE is $ahead commit(s) ahead of origin/$BASE; --sync would discard them:
+note: local $BASE is $ahead commit(s) ahead of origin/$BASE; the run starts from origin and will NOT include:
 
 $(git log --oneline "origin/$BASE..$BASE" | sed 's/^/    /')
 
-  Push them first, or start without --sync from where you are.
+      Push them first if the run should build on them.
 MSG
-        exit 2
       fi
     fi
-    git checkout "$BASE"
-    git reset --hard "origin/$BASE"
-  elif [[ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]]; then
-    echo "note: HEAD is $(git rev-parse --abbrev-ref HEAD), not the base branch $BASE;" >&2
-    echo "      the run branch will be cut from HEAD. Pass --sync to start from origin/$BASE." >&2
-  fi
-
-  # The branch used to be nobody's job: the driver named it, every per-issue
-  # session was told it "already exists, do not create it", and nothing ever
-  # created it.  Create it here, first.
-  if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    echo "branch $BRANCH already exists; checking it out"
-    git checkout "$BRANCH"
-  else
-    echo "creating branch $BRANCH off $(git rev-parse --abbrev-ref HEAD)"
-    git checkout -b "$BRANCH"
+    echo "creating branch $BRANCH off origin/$BASE ($(git rev-parse --short "origin/$BASE"))"
+    git checkout --quiet --no-track -b "$BRANCH" "origin/$BASE"
   fi
 fi
 
