@@ -122,7 +122,10 @@ anything yourself.
   the driver, before anything else, from the tip of the base branch on origin —
   fetched first, every time. The local base branch is left alone; if it is ahead
   of origin, the driver says which commits the run will not include. One branch
-  for the whole run, not one per issue.
+  for the whole run, not one per issue. When the run finishes the driver checks
+  the base branch back out: the work is on the run branch, and a repository
+  left on `issues-165-166-170` looks like somebody is still working there. A
+  run that stopped early stays on its branch, where the unfinished work is.
 
 - **One issue at a time.** Each issue that does **not** depend on those already
   implemented starts with a clean conversation. Which issue is independent is
@@ -183,7 +186,8 @@ it returns to the run branch before continuing.
 Only if **every** issue in the list is implemented and green
 (`/issue-pilot:issues-status` with no `blocked` and everything `done`). Run it
 with `/issue-pilot:issues-pr`, or pass `--pr` to the driver to have it done at
-the end of the run.
+the end of the run. Either way the repository is left on the base branch
+afterwards, with the work on the pushed run branch.
 
 ## Rules
 

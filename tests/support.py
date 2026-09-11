@@ -126,6 +126,11 @@ class PilotTestCase(unittest.TestCase):
                       f"({out.returncode}):\n{out.stdout}\n{out.stderr}")
         return out
 
+    def claude_branches(self):
+        """The branch each `claude` invocation found checked out, in order."""
+        log = self.claude_log.with_name(self.claude_log.name + ".branch")
+        return log.read_text().split() if log.exists() else []
+
     def claude_calls(self):
         """Every `claude` command line the driver ran, in order."""
         if not self.claude_log.exists():

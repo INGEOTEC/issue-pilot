@@ -191,6 +191,7 @@ MSG
 # log will be without having done any work yet.
 if [[ $RESUME -eq 1 ]]; then
   BRANCH="$(python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin)["branch"])')"
+  BASE="$(python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin).get("base_branch") or "")')"
 else
   [[ ${#ARGS[@]} -gt 0 ]] || { echo "usage: issues_run.sh [--from-head] [--detach] [--no-interview] [--pr] <issue>..." >&2; exit 2; }
   BRANCH="$(python3 "$CONFIG" branch-name "${ARGS[@]}")"
@@ -540,3 +541,27 @@ if [[ $OPEN_PR -eq 1 ]]; then
 else
   echo "all issues implemented; open the pull request with: /issue-pilot:issues-pr"
 fi
+
+# ------------------------------------------------------------ hand the tree back
+# The run is over and its work is on the run branch.  What stays checked out is
+# the branch everything starts from, not the last thing the driver touched: a
+# repository left on issues-165-166 looks, a week later, like somebody is still
+# working there.  A run that stopped early is different -- its branch is where
+# the unfinished work is, and that is what should be in front of whoever comes
+# to look at it.
+leave_on_base() {
+  [[ -n "${BASE:-}" ]] || return 0
+  if git show-ref --verify --quiet "refs/heads/$BASE"; then
+    git checkout --quiet "$BASE" || {
+      echo "note: could not check out $BASE; staying on $BRANCH" >&2
+      return 0
+    }
+  else
+    git checkout --quiet --track -b "$BASE" "origin/$BASE" 2>/dev/null || {
+      echo "note: no local $BASE to return to; staying on $BRANCH" >&2
+      return 0
+    }
+  fi
+  echo "back on $BASE; the work is on branch $BRANCH"
+}
+leave_on_base

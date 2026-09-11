@@ -185,6 +185,15 @@ of origin, the driver lists the commits the run will not include. `--from-head`
 is the deliberate exception. Never one branch per issue, and never a pull
 request per issue.
 
+**And you end up back on it.** When the run finishes, the driver checks the base
+branch out again: the work is on the run branch, pushed by the pull request
+step, and a repository left on `issues-165-166-170` looks a week later like
+somebody is still working there. `/issue-pilot:issues-pr` does the same after
+opening the pull request, and `/issue-pilot:issues-close` pulls the merge and
+deletes the local run branch once everything on it is on origin. A run that
+stops early — a blocker, a session that kept dying — stays on its branch, where
+the unfinished work is.
+
 **Planning reads from origin too.** `/issue-pilot:issue-plan`, and the questions
 `/issue-pilot:issues` asks before a run, read the code in a separate worktree of
 `origin/<base>`, not in your working tree — which is usually on a feature branch

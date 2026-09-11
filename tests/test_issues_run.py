@@ -36,9 +36,38 @@ class Run(PilotTestCase):
 
     def test_the_branch_is_named_after_the_issues_and_cut_from_the_base(self):
         self.run_driver("--no-interview", "1", "2", check=True)
-        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"),
-                         "issues-1-2")
+        self.assertEqual(self.claude_branches(), ["issues-1-2", "issues-1-2"])
+        self.assertEqual(self.git("merge-base", "issues-1-2", "main"),
+                         self.git("rev-parse", "main"))
         self.assertEqual(self.state()["base_branch"], "main")
+
+    def test_a_finished_run_hands_the_tree_back_on_the_base_branch(self):
+        # Every session ran on the run branch; nobody should find the
+        # repository left there afterwards, as if work were still going on.
+        out = self.run_driver("--no-interview", "1", "2", check=True)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertIn("back on main", out.stdout)
+        # The work is all on the run branch, and the base branch was not moved.
+        self.assertEqual(self.git("rev-list", "--count", "main..issues-1-2"), "2")
+        self.assertEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_the_pull_request_step_runs_on_the_run_branch_and_ends_on_the_base(self):
+        self.run_driver("--pr", "--no-interview", "1", check=True)
+        # issue #1, then the pull request session -- both with the work checked out.
+        self.assertEqual(self.claude_branches(), ["issues-1", "issues-1"])
+        self.assertIn("issues-pr", self.claude_calls()[-1][1])
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+
+    def test_a_run_that_stops_early_stays_where_the_unfinished_work_is(self):
+        self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1-3")
+
+    def test_a_resumed_run_also_ends_on_the_base_branch(self):
+        self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
+        self.run_driver("--resume", check=True)
+        self.assertEqual(self.state()["status"], {"1": "done", "3": "done"})
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
 
     @staticmethod
     def session_of(call):
@@ -128,7 +157,7 @@ class Run(PilotTestCase):
         self._git("push", "-q", "origin", "main")
         self.land_on_origin("upstream.txt")               # local main is now stale
         self.run_driver("--no-interview", "1", check=True)
-        self.assertTrue((self.repo / "upstream.txt").exists())
+        self.assertIn("upstream.txt", self.git("ls-tree", "--name-only", "issues-1"))
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
         # The local base branch was not touched to get there.
@@ -141,7 +170,10 @@ class Run(PilotTestCase):
         self._git("add", "elsewhere.txt")
         self._git("commit", "-qm", "feature work")
         self.run_driver("--no-interview", "1", check=True)
-        self.assertFalse((self.repo / "elsewhere.txt").exists())
+        self.assertNotIn("elsewhere.txt", self.git("ls-tree", "--name-only", "issues-1"))
+        # The feature branch is left as it was; the tree ends on the base branch.
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertIn("elsewhere.txt", self.git("ls-tree", "--name-only", "feat/elsewhere"))
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
 
@@ -156,7 +188,7 @@ class Run(PilotTestCase):
         out = self.run_driver("--no-interview", "1", check=True)
         self.assertIn("ahead of origin/main", out.stderr)
         self.assertIn("unpushed work", out.stderr)
-        self.assertFalse((self.repo / "unpushed.txt").exists())
+        self.assertNotIn("unpushed.txt", self.git("ls-tree", "--name-only", "issues-1"))
         self.assertEqual(self.git("rev-list", "--count", "origin/main..main"), "1")
 
     def test_from_head_is_the_deliberate_exception(self):
@@ -166,7 +198,7 @@ class Run(PilotTestCase):
         self._git("commit", "-qm", "unpushed work")
         out = self.run_driver("--from-head", "--no-interview", "1", check=True)
         self.assertIn("off HEAD", out.stdout)
-        self.assertTrue((self.repo / "unpushed.txt").exists())
+        self.assertIn("unpushed.txt", self.git("ls-tree", "--name-only", "issues-1"))
 
     def test_an_unreachable_origin_stops_the_run_instead_of_guessing(self):
         self._git("remote", "set-url", "origin", str(self.repo.parent / "gone.git"))

@@ -47,6 +47,29 @@ Closing them is then a separate act, and this is it.
    close: a bare closed issue tells a future reader nothing about where the work
    went.
 
-4. Report which issues were closed, which were already closed, and any that
+4. Tidy the working copy, now that the work is merged. The run is over on
+   GitHub; it should look over here too:
+
+   ```bash
+   git checkout <base>
+   git pull --ff-only origin <base>
+   ```
+
+   Then the local run branch. Delete it **only** when the pull request is
+   actually `MERGED` (never under `--force`) **and** everything on it is on
+   origin, so nothing is lost with it:
+
+   ```bash
+   git fetch origin <branch>
+   git rev-list --count origin/<branch>..<branch>     # must print 0
+   git branch -D <branch>
+   ```
+
+   `-D`, not `-d`: after a squash or rebase merge git cannot tell the branch is
+   merged, which is what the check above is for. If the count is not 0, or the
+   pull request is not merged, keep the branch and say why.
+
+5. Report which issues were closed, which were already closed, and any that
    failed — with the exact error. Do not report success for an issue whose
-   `gh issue close` did not return 0.
+   `gh issue close` did not return 0. Say which branch the repository is on now
+   and whether the run branch was deleted.

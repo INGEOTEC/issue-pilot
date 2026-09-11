@@ -41,7 +41,8 @@ First public release.
   a run outlives whatever started it; `--plan-only` to read the plan before
   committing to it; and a run branch that is always cut from the tip of the base
   branch on origin, fetched first, without touching any local branch
-  (`--from-head` to opt out).
+  (`--from-head` to opt out), and checked back out of when the run finishes, so
+  the repository is left on the base branch and not on the run's.
 - `scripts/base_worktree.sh` — a worktree of `origin/<base>` that the planning
   commands read code from, so a plan is written against the code the work will
   land on and not against whatever is checked out.

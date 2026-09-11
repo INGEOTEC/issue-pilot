@@ -14,6 +14,16 @@ Close the issue-pilot run by opening **one single** pull request.
    If any issue is not `done`, or `blocked` is not null, **do not open a pull
    request**: report the state and stop.
 
+   The driver leaves the repository on the base branch when it finishes, so the
+   work is probably not checked out. Get onto the run branch (`branch` in the
+   state) — the tree has to be clean first; if it is not, stop and say what is
+   in the way:
+
+   ```bash
+   git status --porcelain
+   git checkout <branch>
+   ```
+
 2. Run the full test suite once more, network tests included:
 
    ```bash
@@ -66,7 +76,14 @@ Close the issue-pilot run by opening **one single** pull request.
    Pass `--closes-automatically` **only** when `$base` and `$default` are the
    same string.
 
-6. Report the pull request URL. When the base is not the default branch, say
+6. Put the repository back on the base branch — the run branch is pushed now,
+   and what stays checked out should be the branch everything starts from:
+
+   ```bash
+   git checkout <base_branch>
+   ```
+
+7. Report the pull request URL. When the base is not the default branch, say
    plainly that merging will not close the issues and that
    `/issue-pilot:issues-close` does it once the pull request is merged. Do not
    close them now: the work is not merged yet.
