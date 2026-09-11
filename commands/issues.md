@@ -25,17 +25,27 @@ nothing else. Everything below depends on knowing what this project's tests are
 and which branch runs start from, and guessing either is how an unattended run
 goes quietly wrong.
 
-## 1. Check the ground
+## 1. Get onto the code the run will start from
 
 ```bash
-git status --porcelain      # must be empty
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_sync.sh"
 ```
 
-A run commits as it goes, so anything already in the tree — modified **or
-untracked** — would end up inside its commits, attributed to an issue it has
-nothing to do with. If the tree is dirty, **stop and report it**, listing the
-files; suggest `git stash -u` (and `git stash pop` afterwards) for work that is
-merely in progress. Do not discard or stash anything yourself.
+That checks the base branch out, fetches, and fast-forwards it to the tip
+origin has for it. The run will start from exactly that commit, so that is
+what the issues have to be read against — not the working tree as you found
+it, which is usually on a feature branch or a base branch that fell behind.
+
+It refuses three things, and each one is a **stop and report**, in its own
+words, with nothing stashed or discarded by you:
+
+- A dirty tree, modified **or untracked**. A run commits as it goes, so anything
+  already in the tree would end up inside its commits, attributed to an issue
+  it has nothing to do with. List the files; suggest `git stash -u` (and
+  `git stash pop` afterwards) for work that is merely in progress.
+- A local base branch with commits origin does not have. Those are somebody's
+  unpushed work; the run does not include them and will not delete them.
+- An origin that cannot be reached.
 
 ## 2. Read every issue, against the code the run will start from
 
@@ -45,26 +55,37 @@ All of them, start to finish, in the order given:
 gh issue view <n> --comments
 ```
 
-Then the code — but not the working tree, which may be on a feature branch or
-behind origin. The run itself will start from the tip of the base branch on
-origin, so that is what the issues have to be read against:
+Then find out how much the code has moved since each issue was written:
 
 ```bash
-BASE_TREE="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" add)"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issue_base.py" drift $ARGUMENTS
 ```
 
-Read `CLAUDE.md` and enough of the code each issue touches, **under
-`$BASE_TREE`**, to know whether it is implementable as written. Not just the
-first issue: a contradiction between the third and the fifth is exactly the kind
-of thing that has to surface now. If the fetch fails, stop and say so.
+`/issue-pilot:issue-plan` ends every issue it writes with the commit of the
+base branch the plan was read against. This prints, per issue, whether that
+commit is still the tip or which commits have landed since, and which files
+they touched. For an issue that is behind, read those commits next to the
+issue — `git log -p <planned>..HEAD -- <files>` is usually enough — looking for
+what the plan assumes that is no longer true: a file that moved, a function
+that was renamed or removed, a behaviour another change already added or
+altered, a step that is now already done. Every such point is either a
+question for step 3 or a decision recorded in the notes; none of it may be
+left for a session with nobody to ask. An issue with no recorded commit is read
+against the tip as it is now, and you say so in the notes.
+
+Then read `CLAUDE.md` and enough of the code each issue touches, in the
+working tree — which step 1 put at the tip of origin — to know whether it is
+implementable as written. Not just the first issue: a contradiction between
+the third and the fifth is exactly the kind of thing that has to surface now.
 
 ## 3. Ask everything, once
 
 Put **all** your questions into a single `AskUserQuestion` batch. What counts as
 a question: where two readings of an issue lead to materially different work,
 where a design decision is not settled, where two issues contradict each other,
-where an issue depends on one that is not in the list. What does not: anything a
-sensible default settles — decide it, and record the default.
+where an issue depends on one that is not in the list, where the code has moved
+under an issue since it was planned and the plan no longer fits. What does not:
+anything a sensible default settles — decide it, and record the default.
 
 Ask as well how long the slowest thing that has to run takes (downloads, sweeps,
 training) and how to tell whether it finished. An autonomous session that does
@@ -80,13 +101,13 @@ NOTES="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" notes-file $ARG
 ```
 
 Write to that path: the answers, the defaults you decided, which issue each
-point applies to, how long the slow steps take, and — explicitly — what must
-**not** be done. Plain text.
+point applies to, what has changed in the code since each issue was planned
+and how the plan is to be read in the light of it, how long the slow steps
+take, and — explicitly — what must **not** be done. Plain text.
 
 ## 5. Start the run
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" remove
 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --detach --notes-file "$NOTES" $ARGUMENTS
 ```
 
@@ -95,11 +116,12 @@ to: a run takes hours, far longer than any tool call, and a run tied to this
 conversation would die with it. The command prints the branch and the driver's
 log path.
 
-The driver fetches and cuts the run branch from `origin/<base>` — always, and
-without touching the local base branch or whatever is checked out. The base
-branch comes from `.issue-pilot.json` or from the repository's default branch on
-GitHub; do not guess it yourself, and do not pass `--from-head` unless the user
-explicitly asks to start from the local checkout.
+The driver syncs the base branch with origin once more, exactly as step 1 did,
+and cuts the run branch from it right before the first
+`/issue-pilot:issues-one` — never from whatever happens to be checked out. The
+base branch comes from `.issue-pilot.json` or from the repository's default
+branch on GitHub; do not guess it yourself, and do not pass `--from-head`
+unless the user explicitly asks to start from the local checkout.
 
 ## 6. Report
 
@@ -119,10 +141,11 @@ anything yourself.
   78 before starting rather than failing half-way through.
 
 - **The branch.** Derived from the issue list (`issues-165-166-170`) and cut by
-  the driver, before anything else, from the tip of the base branch on origin —
-  fetched first, every time. The local base branch is left alone; if it is ahead
-  of origin, the driver says which commits the run will not include. One branch
-  for the whole run, not one per issue. When the run finishes the driver checks
+  the driver, right before the first issue, from the base branch after it has
+  been checked out, fetched and fast-forwarded to origin's tip — every time. A
+  local base branch with commits origin does not have stops the run rather than
+  being reset. The commit the branch was cut from is kept in the state. One
+  branch for the whole run, not one per issue. When the run finishes the driver checks
   the base branch back out: the work is on the run branch, and a repository
   left on `issues-165-166-170` looks like somebody is still working there. A
   run that stopped early stays on its branch, where the unfinished work is.

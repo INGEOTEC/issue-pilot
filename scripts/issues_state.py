@@ -8,8 +8,9 @@ run stopped all live in one JSON file per repository, under
 `$ISSUE_PILOT_HOME/state` (`~/.claude/issue-pilot/state` by default).
 
 Subcommands
-  init <issues...> [--branch B] [--repo R] [--notes TEXT]
-        Builds the plan (issues_plan.py) and stores it.
+  init <issues...> [--branch B] [--base-branch B] [--base-commit SHA] [--repo R] [--notes TEXT]
+        Builds the plan (issues_plan.py) and stores it, together with the
+        commit of the base branch the run branch was cut from.
   next  Prints the next pending issue and whether the conversation must be
         cleared before starting it.  Exits 3 when the run is finished.
   attempt <n>                 Records another attempt on an issue.
@@ -106,6 +107,7 @@ def cmd_init(args):
         "repo": args.repo,
         "branch": args.branch,
         "base_branch": args.base_branch,
+        "base_commit": args.base_commit or None,
         "notes": args.notes or "",
         "plan": plan["plan"],
         "status": {str(n): "pending" for n in plan["issues"]},
@@ -219,7 +221,10 @@ def cmd_status(args):
     state = load()
     attempts = state.get("attempts", {})
     print(f"repository : {state['repo_root']}")
-    print(f"branch     : {state.get('branch')} (off {state.get('base_branch') or '?'})")
+    off = state.get("base_branch") or "?"
+    if state.get("base_commit"):
+        off += f" at {state['base_commit'][:9]}"
+    print(f"branch     : {state.get('branch')} (off {off})")
     print(f"started    : {state.get('created_at', '?')}")
     running = driver(state)
     if running:
@@ -274,6 +279,7 @@ def main():
     p.add_argument("issues", nargs="+", type=int)
     p.add_argument("--branch")
     p.add_argument("--base-branch")
+    p.add_argument("--base-commit")
     p.add_argument("--repo")
     p.add_argument("--notes")
     p.set_defaults(func=cmd_init)

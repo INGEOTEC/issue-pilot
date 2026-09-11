@@ -16,11 +16,13 @@
 # repository meanwhile -- to look at the run's status, if nothing else.
 #
 # The branch is derived from the issue list (`issues-165-166`) and created by
-# this script, before anything else, off the tip of the base branch AS IT IS ON
-# ORIGIN -- fetched first, every time.  Whatever is checked out locally, and
-# whatever the local base branch is at, does not come into it: the run has to
-# start from what everybody else has, and the local base branch is nobody's to
-# reset.  --from-head is the deliberate exception.
+# this script, right before the first issue is started, off the tip of the base
+# branch AS IT IS ON ORIGIN: the base branch is checked out, fetched and
+# fast-forwarded first, every time (base_sync.sh).  Whatever was checked out
+# before does not come into it: the run has to start from what everybody else
+# has.  A local base branch with commits origin does not have stops the run
+# rather than being reset -- those are somebody's unpushed work.  --from-head is
+# the deliberate exception.
 #
 # A run outlives any single command, so it can also be started detached: with
 # --detach the driver relaunches itself in its own session, prints where its log
@@ -29,7 +31,7 @@
 # interview, so it needs the answers up front (--notes-file / --notes) or none at
 # all (--no-interview).
 #
-#   issues_run.sh 165 166 170           # branch cut from origin/<base>, always fetched first
+#   issues_run.sh 165 166 170           # base branch synced with origin, run branch cut from it
 #   issues_run.sh --from-head 165 166   # cut it from HEAD instead (offline, or on purpose)
 #   issues_run.sh --notes "answers agreed elsewhere" 165 166  # skips phase 1
 #   issues_run.sh --notes-file notes.txt 165 166              # the same, from a file
@@ -283,6 +285,7 @@ if [[ $RESUME -eq 0 ]]; then
   require_clean_tree
 
   BASE="$(python3 "$CONFIG" base-branch)"
+  BASE_COMMIT=""
 
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
     # A rerun over the same issues picks the existing branch up as it is;
@@ -293,29 +296,15 @@ if [[ $RESUME -eq 0 ]]; then
     echo "creating branch $BRANCH off HEAD ($(git rev-parse --abbrev-ref HEAD)) as asked"
     git checkout -b "$BRANCH"
   else
-    echo "fetching origin/$BASE"
-    git fetch --quiet origin "$BASE" || {
-      echo "error: could not fetch origin/$BASE. The run starts from origin, not from what is checked out;" >&2
-      echo "       fix the network or the remote, or pass --from-head to start from HEAD on purpose." >&2
+    # base_sync.sh checks the base branch out and fast-forwards it to origin,
+    # refusing a dirty tree, an unreachable origin and a local base branch that
+    # is ahead of origin.  It prints the commit the base is now at.
+    BASE_COMMIT="$(bash "$SCRIPTS/base_sync.sh")" || {
+      echo "       The run starts from origin, not from what is checked out; pass --from-head to start from HEAD on purpose." >&2
       exit 1
     }
-    # The local base branch is left exactly as it was.  If it is ahead of
-    # origin, say so: those commits are somebody's unpushed work and this run
-    # will not include them, which is either what they want or a surprise.
-    if git show-ref --verify --quiet "refs/heads/$BASE"; then
-      ahead="$(git rev-list --count "origin/$BASE..$BASE")"
-      if (( ahead > 0 )); then
-        cat >&2 <<MSG
-note: local $BASE is $ahead commit(s) ahead of origin/$BASE; the run starts from origin and will NOT include:
-
-$(git log --oneline "origin/$BASE..$BASE" | sed 's/^/    /')
-
-      Push them first if the run should build on them.
-MSG
-      fi
-    fi
-    echo "creating branch $BRANCH off origin/$BASE ($(git rev-parse --short "origin/$BASE"))"
-    git checkout --quiet --no-track -b "$BRANCH" "origin/$BASE"
+    echo "creating branch $BRANCH off $BASE ($(git rev-parse --short "$BASE_COMMIT"), the tip of origin/$BASE)"
+    git checkout --quiet --no-track -b "$BRANCH" "$BASE"
   fi
 fi
 
@@ -380,7 +369,7 @@ EOF
     NOTES="$(cat "$NOTES_FILE")"
   fi
 
-  init=("$STATE" init "${ARGS[@]}" --branch "$BRANCH" --base-branch "${BASE:-}")
+  init=("$STATE" init "${ARGS[@]}" --branch "$BRANCH" --base-branch "${BASE:-}" --base-commit "${BASE_COMMIT:-}")
   [[ -n "$NOTES" ]] && init+=(--notes "$NOTES")
   [[ -n "$REPO"  ]] && init+=(--repo "$REPO")
   python3 "${init[@]}" >/dev/null

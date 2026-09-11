@@ -103,6 +103,7 @@ class Run(PilotTestCase):
     def test_every_session_runs_on_the_configured_model(self):
         # Not on whatever model the caller happens to be using.
         self.write_config({"test_command": "true", "model": "opus", "effort": "low"})
+        self._git("push", "-q", "origin", "main")
         self.run_driver("--no-interview", "1", check=True)
         call = self.claude_calls()[0]
         self.assertEqual(call[call.index("--model") + 1], "opus")
@@ -153,15 +154,16 @@ class Run(PilotTestCase):
                     ["git", "push", "-q", "origin", "HEAD:main"]):
             subprocess.run(cmd, cwd=other, check=True, capture_output=True)
 
-    def test_the_run_branch_is_cut_from_origin_not_from_the_local_base(self):
+    def test_the_run_branch_is_cut_from_origin_and_the_local_base_is_brought_up_to_it(self):
         self._git("push", "-q", "origin", "main")
         self.land_on_origin("upstream.txt")               # local main is now stale
         self.run_driver("--no-interview", "1", check=True)
         self.assertIn("upstream.txt", self.git("ls-tree", "--name-only", "issues-1"))
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
-        # The local base branch was not touched to get there.
-        self.assertNotEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
+        # The local base branch was fast-forwarded on the way, not left behind.
+        self.assertEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
+        self.assertEqual(self.state()["base_commit"], self.git("rev-parse", "origin/main"))
 
     def test_the_run_starts_from_origin_even_when_checked_out_elsewhere(self):
         self._git("push", "-q", "origin", "main")
@@ -177,22 +179,21 @@ class Run(PilotTestCase):
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
 
-    def test_unpushed_commits_on_the_base_are_reported_and_left_out(self):
-        # setUp committed the configuration locally and never pushed it.  The
-        # run must neither include it silently nor destroy it -- and .issue-pilot.json
-        # has to exist on origin for the run to be allowed to start at all.
-        self._git("push", "-q", "origin", "main")
+    def test_unpushed_commits_on_the_base_stop_the_run_and_are_kept(self):
+        # The run must neither include the commit silently nor destroy it.
         (self.repo / "unpushed.txt").write_text("not on origin\n")
         self._git("add", "unpushed.txt")
         self._git("commit", "-qm", "unpushed work")
-        out = self.run_driver("--no-interview", "1", check=True)
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 1)
         self.assertIn("ahead of origin/main", out.stderr)
         self.assertIn("unpushed work", out.stderr)
-        self.assertNotIn("unpushed.txt", self.git("ls-tree", "--name-only", "issues-1"))
+        self.assertIn("--from-head", out.stderr)
+        self.assertFalse(self.git("branch", "--list", "issues-1"))
         self.assertEqual(self.git("rev-list", "--count", "origin/main..main"), "1")
+        self.assertEqual(self.claude_calls(), [])
 
     def test_from_head_is_the_deliberate_exception(self):
-        self._git("push", "-q", "origin", "main")
         (self.repo / "unpushed.txt").write_text("not on origin\n")
         self._git("add", "unpushed.txt")
         self._git("commit", "-qm", "unpushed work")

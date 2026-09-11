@@ -119,11 +119,13 @@ reaches the model. The plan is written from what you say; a plan produced from
 an empty request would be a guess at what you might have wanted, which is the
 one thing this workflow exists to rule out.
 
-That session reads your code, asks everything it cannot settle with a sensible
-default — in one batch, not one question at a time — and opens an issue with
-the sections the autonomous side knows how to read: context, scope (including
-what is *out* of scope), implementation plan, acceptance criteria, tests, and
-the defaults it decided. It prints the command to implement it.
+That session puts the repository on the base branch, at the tip origin has for
+it, and reads your code there. It asks everything it cannot settle with a
+sensible default — in one batch, not one question at a time — and opens an
+issue with the sections the autonomous side knows how to read: context, scope
+(including what is *out* of scope), implementation plan, acceptance criteria,
+tests, the defaults it decided, and the commit the plan was read against. It
+prints the command to implement it.
 
 Then run it:
 
@@ -131,9 +133,11 @@ Then run it:
 /issue-pilot:issues 165 166 170
 ```
 
-That session asks you everything the run will need — in one batch — and then
-puts the run in the background and gives you the prompt back. It takes hours;
-you are not meant to sit in front of it.
+That session puts the repository on the base branch again, at origin's tip,
+and reads each issue against it — including what has landed on the base branch
+since the issue was planned, when anything has. It asks you everything the run
+will need — in one batch — and then puts the run in the background and gives
+you the prompt back. It takes hours; you are not meant to sit in front of it.
 
 Check on it at any time, from any session:
 
@@ -143,7 +147,7 @@ Check on it at any time, from any session:
 
 ```
 repository : /home/you/project
-branch     : issues-165-166-170 (off develop)
+branch     : issues-165-166-170 (off develop at 3c9d1e2f0)
 
  + #165    done     fresh=True  depends=-        attempts=1 commit=a1b2c3d4e
      Extract the reader into its own module
@@ -177,13 +181,13 @@ last to look at the status. Opening Claude Code in the repository while a run is
 going is safe.
 
 **The branch starts from origin, always.** One branch for the whole run, named
-from the issue list (`issues-165-166-170`), cut by the driver before anything
-else from the tip of the base branch **as it is on origin** — fetched first,
-every time. Whatever you have checked out, and wherever your local base branch
-is, does not come into it, and neither is touched; if your local base is ahead
-of origin, the driver lists the commits the run will not include. `--from-head`
-is the deliberate exception. Never one branch per issue, and never a pull
-request per issue.
+from the issue list (`issues-165-166-170`), cut by the driver right before the
+first issue from the base branch **as it is on origin**: the base branch is
+checked out, fetched and fast-forwarded first, every time. Whatever you had
+checked out does not come into it. A local base branch with commits origin does
+not have stops the run rather than being reset — those are somebody's unpushed
+work — and the driver lists them. `--from-head` is the deliberate exception.
+Never one branch per issue, and never a pull request per issue.
 
 **And you end up back on it.** When the run finishes, the driver checks the base
 branch out again: the work is on the run branch, pushed by the pull request
@@ -194,10 +198,14 @@ deletes the local run branch once everything on it is on origin. A run that
 stops early — a blocker, a session that kept dying — stays on its branch, where
 the unfinished work is.
 
-**Planning reads from origin too.** `/issue-pilot:issue-plan`, and the questions
-`/issue-pilot:issues` asks before a run, read the code in a separate worktree of
-`origin/<base>`, not in your working tree — which is usually on a feature branch
-of its own while you plan the next thing.
+**Planning happens on the same code, and the issue remembers which.**
+`/issue-pilot:issue-plan` puts the repository on the base branch at origin's
+tip before it reads anything — not on the feature branch you happened to be on
+— and ends the issue with the commit the plan was read against. Days later,
+`/issue-pilot:issues` reads that commit back and lists what has landed on the
+base branch since, and which files it touched, so a plan that names a file
+that has moved or a behaviour another change already altered is caught in the
+one session that still has somebody to ask.
 
 **The model.** Every autonomous session runs on the model and effort level in
 `.issue-pilot.json` (`sonnet` and `high` by default), never on whatever the
@@ -314,8 +322,9 @@ scripts/issues_run.sh --pr 165 166                # open the pull request too
 scripts/issues_run.sh --resume                    # retry the blocked issue
 ```
 
-The driver fetches and cuts the run branch from `origin/<base>` unless told
-`--from-head`; it never resets your local branches. Run from your own terminal
+The driver fast-forwards the local base branch to `origin/<base>` and cuts the
+run branch from it unless told `--from-head`; a base branch with unpushed
+commits stops it rather than being reset. Run from your own terminal
 with no `--notes`, it conducts the interview itself in an interactive `claude`
 session. `--detach` cannot: it has nobody to
 ask, so it requires the answers up front or none at all.

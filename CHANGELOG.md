@@ -13,7 +13,8 @@ First public release.
 ### Added
 
 - `/issue-pilot:issues` — asks, in your own session, everything an unattended
-  run will need, then starts that run in the background: a list of GitHub issues
+  run will need — including what has landed on the base branch since each issue
+  was planned — then starts that run in the background: a list of GitHub issues
   implemented one at a time with a single pull request at the end, clearing the
   conversation between issues that do not depend on each other.
 - `/issue-pilot:issues-one` and `/issue-pilot:issues-pr` — the per-issue and
@@ -21,8 +22,9 @@ First public release.
 - `/issue-pilot:init` — inspects the project, proposes a configuration and
   confirms it with you. Nothing else runs until `.issue-pilot.json` exists.
 - `/issue-pilot:issue-plan` — interviews you and opens a well-formed
-  implementation issue that an unattended run can execute. A hook refuses it
-  when given nothing to plan: the plan is written from what was said, never
+  implementation issue that an unattended run can execute, ending with the
+  commit of the base branch the plan was read against. A hook refuses it when
+  given nothing to plan: the plan is written from what was said, never
   inferred.
 - `/issue-pilot:issues-close` — closes the run's issues once its pull request is
   merged, for the projects where GitHub will not: `Closes #<n>` is honoured only
@@ -39,13 +41,16 @@ First public release.
   up by mistake; retries that resume a dead session rather than restarting it;
   an explicit distinction between a crash and a declared blocker; `--detach` so
   a run outlives whatever started it; `--plan-only` to read the plan before
-  committing to it; and a run branch that is always cut from the tip of the base
-  branch on origin, fetched first, without touching any local branch
-  (`--from-head` to opt out), and checked back out of when the run finishes, so
-  the repository is left on the base branch and not on the run's.
-- `scripts/base_worktree.sh` — a worktree of `origin/<base>` that the planning
-  commands read code from, so a plan is written against the code the work will
-  land on and not against whatever is checked out.
+  committing to it; and a run branch that is always cut, right before the first
+  issue, from the base branch fast-forwarded to its tip on origin (`--from-head`
+  to opt out), and checked back out of when the run finishes, so the repository
+  is left on the base branch and not on the run's.
+- `scripts/base_sync.sh` — puts the repository on the base branch at the tip
+  origin has for it, refusing a dirty tree and never discarding unpushed
+  commits; every planning command and the driver start there.
+- `scripts/issue_base.py` — the stamp that records in an issue which commit it
+  was planned against, and the report of what has landed on the base branch
+  since, per issue.
 - `hooks/usage-guard.sh` — measures every usage window the API reports; waits
   out a window that resets soon, halts the run on one that cannot be waited out
   (the weekly one), and once halted refuses an autonomous session's very next

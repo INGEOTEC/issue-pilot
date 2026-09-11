@@ -38,26 +38,27 @@ nothing else. Everything below depends on knowing what this project's tests are
 and which branch runs start from, and guessing either is how an unattended run
 goes quietly wrong.
 
-## 1. Read the code where the work will land
-
-Not the working tree. It may be on a feature branch, behind origin, or in the
-middle of something else, and a plan written against that is a plan for the
-wrong codebase. Check out the tip of the base branch **as it is on origin** in a
-worktree of its own:
+## 1. Get onto the code the work will land on
 
 ```bash
-BASE_TREE="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" add)"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_sync.sh"
 ```
 
-That fetches first, every time, and prints a path outside the repository. Read
-`CLAUDE.md`, the code and the tests **under `$BASE_TREE`**, not under the
-current directory. If it fails because origin is unreachable, stop and say so:
-do not fall back to whatever is checked out.
+That checks the base branch out, fetches, and fast-forwards it to the tip
+origin has for it, and prints the commit it is now at. The plan is written
+against that commit and nothing else: not a feature branch that happened to be
+checked out, not a base branch that fell behind while something else was being
+worked on. A plan written against either is a plan for the wrong codebase.
+
+If it refuses, **stop** and repeat its message to the user: a dirty tree
+(suggest `git stash -u`, and `git stash pop` afterwards), a base branch with
+commits origin does not have, or an origin that cannot be reached. Do not fall
+back to whatever is checked out, and do not stash or discard anything yourself.
 
 ## 2. Read before you ask
 
 Explore first, so your questions are about decisions and not about facts you
-could have looked up — all of it under `$BASE_TREE`:
+could have looked up:
 
 - `CLAUDE.md` and the project's conventions (tests, layout, style, base branch).
 - The code the change touches: where it would live, what already does something
@@ -111,7 +112,23 @@ green.
 ## Decisions
 The defaults you settled here, with a one-line reason each. This is what stops a
 later session from re-litigating them.
+
+_Planned against `<base>` at `<commit>`._
 ```
+
+The last line is printed for you, and has to be **exactly** what it prints:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issue_base.py" stamp
+```
+
+It records the commit this plan was read against. When the issue is finally
+implemented, days and several merged pull requests later,
+`/issue-pilot:issues` reads it back and works out what has landed on the base
+branch since — which is how a plan that names a file that has since moved, or
+a behaviour another change already altered, gets caught while there is still a
+person to ask. With `--update`, replace the stamp the issue already carries:
+the plan has just been re-read against today's code.
 
 **Dependencies, deliberately.** issue-pilot decides whether a later issue starts
 from a clean conversation by looking for `#N` mentions between the issues of a
@@ -146,10 +163,5 @@ Also say, in one line each, which questions you decided yourself and what the
 defaults were — the user should be able to catch a wrong default here, before a
 run spends an hour on it.
 
-Finally, drop the worktree:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_worktree.sh" remove
-```
-
-Do not implement anything and do not touch the working tree.
+Do not implement anything. Leave the repository where step 1 put it, on the
+base branch.
