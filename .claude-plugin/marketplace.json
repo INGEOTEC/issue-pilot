@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "issue-pilot",
-  "description": "INGEOTEC's issue-pilot: unattended, dependency-aware implementation of GitHub issues with Claude Code.",
+  "name": "ingeotec",
+  "description": "Claude Code plugins by INGEOTEC. Currently: issue-pilot, unattended, dependency-aware implementation of GitHub issues.",
   "owner": {
     "name": "INGEOTEC",
     "url": "https://github.com/INGEOTEC"

@@ -39,8 +39,13 @@ it halts the run cleanly and tells you when to come back.
 
 ```
 /plugin marketplace add INGEOTEC/issue-pilot
-/plugin install issue-pilot
+/plugin install issue-pilot@ingeotec
 ```
+
+The repository is its own marketplace, named `ingeotec`; the part after the `@`
+is that marketplace, not the GitHub organisation, though here they happen to
+read the same. Plain `/plugin install issue-pilot` also works as long as no
+other marketplace you have added offers a plugin of that name.
 
 Restart Claude Code, then configure the repository you want to use it on:
 
@@ -335,6 +340,18 @@ run that works and one that stalls is almost always in the issue, so
 ```bash
 python3 -m unittest discover -s tests -t tests
 ```
+
+To try a working copy as a plugin, add the checkout itself as a marketplace and
+install from it:
+
+```
+/plugin marketplace add /path/to/issue-pilot
+/plugin install issue-pilot@ingeotec
+```
+
+Claude Code copies the plugin into its cache at install time, so edits to the
+checkout are not live: after a change, `/plugin marketplace update ingeotec`
+and then `/plugin update issue-pilot@ingeotec`, and restart.
 
 No dependencies beyond the standard library: the tests run the real scripts
 against a throwaway git repository, a fake `gh` and a fake `curl`, so what is
