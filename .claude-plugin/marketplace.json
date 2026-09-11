@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "issue-pilot",
+  "description": "INGEOTEC's issue-pilot: unattended, dependency-aware implementation of GitHub issues with Claude Code.",
+  "owner": {
+    "name": "INGEOTEC",
+    "url": "https://github.com/INGEOTEC"
+  },
+  "plugins": [
+    {
+      "name": "issue-pilot",
+      "source": "./",
+      "category": "workflow",
+      "description": "Turn a list of GitHub issues into one reviewed pull request, unattended: a deterministic plan decides when the conversation is cleared, on-disk state survives it, and a usage guard keeps the run inside your 5-hour and weekly windows.",
+      "author": {
+        "name": "INGEOTEC",
+        "url": "https://github.com/INGEOTEC"
+      },
+      "homepage": "https://github.com/INGEOTEC/issue-pilot",
+      "license": "Apache-2.0"
+    }
+  ]
+}

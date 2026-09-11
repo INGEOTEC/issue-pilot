@@ -1,0 +1,10 @@
+{
+  "base_branch": "develop",
+  "branch_prefix": "issues",
+  "test_command": "pytest -q",
+  "model": "sonnet",
+  "effort": "high",
+  "max_attempts": 3,
+  "pr_draft": false,
+  "issue_labels": ["automated"]
+}

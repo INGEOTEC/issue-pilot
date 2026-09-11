@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""A curl that returns the headers a test asks for.
+
+The usage guard calls curl as `curl ... -o /dev/null -D <file> -w '%{http_code}'`,
+so this writes $FAKE_HEADERS to the file after -D and prints $FAKE_CODE.  Faking
+the headers is the only way to reach the interesting branches of the guard
+without waiting five hours for a real window to fill.
+"""
+import os
+import sys
+
+argv = sys.argv[1:]
+if "-D" in argv:
+    with open(argv[argv.index("-D") + 1], "w") as fh:
+        fh.write(os.environ.get("FAKE_HEADERS", ""))
+sys.stdout.write(os.environ.get("FAKE_CODE", "200"))

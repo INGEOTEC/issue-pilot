@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The toolkit runs on whatever python3 the user's machine already has,
+        # so the oldest version we claim to support is tested too.
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run the test suite
+        run: python3 -m unittest discover -s tests -t tests -v
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: |
+          for f in $(git ls-files '*.sh'); do bash -n "$f"; done
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning $(git ls-files '*.sh')
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The plugin and marketplace manifests must be valid JSON
+        run: |
+          for f in .claude-plugin/*.json .issue-pilot.example.json; do
+            python3 -m json.tool "$f" > /dev/null && echo "ok: $f"
+          done
+      - name: Every command file must have front matter with a description
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          bad = []
+          for f in sorted(pathlib.Path("commands").glob("*.md")):
+              head = f.read_text().split("---")
+              if len(head) < 3 or "description:" not in head[1]:
+                  bad.append(str(f))
+          if bad:
+              sys.exit("missing front matter or description: " + ", ".join(bad))
+          print("ok: every command file has a description")
+          PY

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "issue-pilot",
+  "version": "0.1.0",
+  "description": "Turn a list of GitHub issues into one reviewed pull request, unattended: a deterministic plan decides when the conversation is cleared, on-disk state survives it, and a usage guard keeps the run inside your 5-hour and weekly windows.",
+  "author": {
+    "name": "INGEOTEC",
+    "url": "https://github.com/INGEOTEC"
+  },
+  "homepage": "https://github.com/INGEOTEC/issue-pilot",
+  "repository": "https://github.com/INGEOTEC/issue-pilot",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "issues",
+    "automation",
+    "autonomous",
+    "rate-limit",
+    "pull-request",
+    "workflow"
+  ]
+}

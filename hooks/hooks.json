@@ -1,0 +1,17 @@
+{
+  "description": "Measures your Claude usage windows every few minutes and pauses the session before a long autonomous run exhausts them.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-guard.sh\"",
+            "timeout": 21600
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "base_branch": "main",
+  "test_command": "python3 -m unittest discover -s tests -t tests",
+  "model": "sonnet",
+  "effort": "high"
+}
