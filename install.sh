@@ -12,7 +12,7 @@
 # since outside a plugin nothing would define it.
 #
 #   ./install.sh              install or update
-#   ./install.sh --hook       also register the usage guard in settings.json
+#   ./install.sh --hook       also register the hooks in settings.json
 #   ./install.sh --uninstall  remove everything this script installed
 set -euo pipefail
 
@@ -35,8 +35,8 @@ done
 if [[ $UNINSTALL -eq 1 ]]; then
   rm -rf "$LIB" "$COMMANDS"
   echo "removed $LIB and $COMMANDS"
-  echo "note: the usage-guard hook, if you registered it, is still in $SETTINGS;"
-  echo "      remove the issue-pilot entry from its PreToolUse list by hand."
+  echo "note: the hooks, if you registered them, are still in $SETTINGS;"
+  echo "      remove the issue-pilot entries from its PreToolUse and UserPromptSubmit lists by hand."
   echo "note: run state in ${ISSUE_PILOT_HOME:-$CLAUDE_DIR/issue-pilot} was left alone."
   exit 0
 fi
@@ -62,11 +62,10 @@ echo "  toolkit  -> $LIB"
 echo "  commands -> $COMMANDS  (/issue-pilot:issues, /issue-pilot:issue-plan, ...)"
 
 if [[ $WITH_HOOK -eq 1 ]]; then
-  python3 - "$SETTINGS" "$LIB/hooks/usage-guard.sh" <<'PY'
+  python3 - "$SETTINGS" "$LIB" "$SRC/hooks/hooks.json" <<'PY'
 import json, pathlib, shutil, sys
 
-settings_path, guard = pathlib.Path(sys.argv[1]), sys.argv[2]
-command = f'bash "{guard}"'
+settings_path, lib, manifest = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
 
 settings = {}
 if settings_path.exists():
@@ -76,32 +75,34 @@ if settings_path.exists():
         sys.exit(f"{settings_path} is not valid JSON; not touching it")
     shutil.copy(settings_path, str(settings_path) + ".issue-pilot.bak")
 
-hooks = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
-# Replace any entry we installed before instead of stacking another one.
-hooks[:] = [h for h in hooks
-            if not any("usage-guard.sh" in (inner.get("command") or "")
-                       for inner in h.get("hooks", []))]
-hooks.append({"matcher": "*",
-              "hooks": [{"type": "command", "command": command,
-                         "timeout": 21600}]})
+# The plugin's own manifest is the single source of truth for which hooks
+# exist; here they are just re-rooted from ${CLAUDE_PLUGIN_ROOT} to the copy
+# this script made, and any entry a previous install left is replaced.
+ours = json.loads(manifest.read_text())["hooks"]
+hooks = settings.setdefault("hooks", {})
+
+
+def is_ours(entry):
+    return any(lib in (inner.get("command") or "") or "issue-pilot" in (inner.get("command") or "")
+               for inner in entry.get("hooks", []))
+
+
+for event, entries in ours.items():
+    current = hooks.setdefault(event, [])
+    current[:] = [h for h in current if not is_ours(h)]
+    for entry in entries:
+        current.append(json.loads(json.dumps(entry).replace("${CLAUDE_PLUGIN_ROOT}", lib)))
 settings_path.parent.mkdir(parents=True, exist_ok=True)
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-print(f"  hook     -> registered in {settings_path} (backup: {settings_path}.issue-pilot.bak)")
+print(f"  hooks    -> {', '.join(ours)} registered in {settings_path} (backup: {settings_path}.issue-pilot.bak)")
 PY
 else
   cat <<EOF
 
-The usage guard is not registered. To have it watch your usage windows, either
-re-run with --hook, or add this to the "hooks" section of $SETTINGS:
-
-  "PreToolUse": [
-    {
-      "matcher": "*",
-      "hooks": [
-        { "type": "command", "command": "bash \\"$LIB/hooks/usage-guard.sh\\"", "timeout": 21600 }
-      ]
-    }
-  ]
+The hooks are not registered. To have the usage guard watch your usage windows
+and /issue-pilot:issue-plan refuse an empty request, either re-run with --hook,
+or copy the entries from $SRC/hooks/hooks.json into the "hooks" section of
+$SETTINGS, replacing \${CLAUDE_PLUGIN_ROOT} with $LIB.
 EOF
 fi
 

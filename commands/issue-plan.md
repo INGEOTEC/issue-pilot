@@ -6,6 +6,19 @@ allowed-tools: Bash, Read, Write, Glob, Grep, WebFetch
 
 Write the implementation issue for: $ARGUMENTS
 
+## Before anything: there has to be a request
+
+If `$ARGUMENTS` is empty, or is `--update` with no issue number, **stop**. Do
+not explore the code to work out what might be wanted, do not ask a round of
+questions to reconstruct a request, do not propose something plausible. Say, in
+two lines, that the command needs the request written out —
+`/issue-pilot:issue-plan <what you want built>` — and end there.
+
+The rule holds for the rest of this command too: the plan is built **from what
+was said**. Questions in step 3 sharpen the stated request; they never replace
+it. Where the request is silent, decide a default and record it as a decision —
+but where the request is *absent*, there is nothing to decide about.
+
 This is the front half of issue-pilot. `/issue-pilot:issues` will later hand this
 issue to a session that has **nobody to ask** — so everything that session will
 need has to be decided here, while you still have a person in front of you.

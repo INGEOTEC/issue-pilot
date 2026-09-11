@@ -21,7 +21,9 @@ First public release.
 - `/issue-pilot:init` — inspects the project, proposes a configuration and
   confirms it with you. Nothing else runs until `.issue-pilot.json` exists.
 - `/issue-pilot:issue-plan` — interviews you and opens a well-formed
-  implementation issue that an unattended run can execute.
+  implementation issue that an unattended run can execute. A hook refuses it
+  when given nothing to plan: the plan is written from what was said, never
+  inferred.
 - `/issue-pilot:issues-close` — closes the run's issues once its pull request is
   merged, for the projects where GitHub will not: `Closes #<n>` is honoured only
   on a merge into the repository's default branch.

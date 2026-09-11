@@ -1,5 +1,5 @@
 {
-  "description": "Measures your Claude usage windows every few minutes and pauses the session before a long autonomous run exhausts them.",
+  "description": "Measures your Claude usage windows every few minutes and pauses the session before a long autonomous run exhausts them; refuses /issue-pilot:issue-plan when it is given nothing to plan.",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,17 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-guard.sh\"",
             "timeout": 21600
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/require_request.py\"",
+            "timeout": 10
           }
         ]
       }

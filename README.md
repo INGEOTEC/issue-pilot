@@ -113,6 +113,12 @@ Then write the issue:
 /issue-pilot:issue-plan add a --format flag to the export command
 ```
 
+The request is not optional, and that is enforced by a hook rather than asked
+for: `/issue-pilot:issue-plan` with nothing after it is refused before it
+reaches the model. The plan is written from what you say; a plan produced from
+an empty request would be a guess at what you might have wanted, which is the
+one thing this workflow exists to rule out.
+
 That session reads your code, asks everything it cannot settle with a sensible
 default — in one batch, not one question at a time — and opens an issue with
 the sections the autonomous side knows how to read: context, scope (including
