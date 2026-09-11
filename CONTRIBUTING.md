@@ -44,9 +44,10 @@ claude plugin validate . --strict
 
 To exercise a change as an installed plugin, add your checkout as a marketplace
 (`/plugin marketplace add /path/to/issue-pilot`) and install
-`issue-pilot@ingeotec` from it. The install is a copy, not a link: after each
-change run `/plugin marketplace update ingeotec` and `/plugin update
-issue-pilot@ingeotec`, then restart Claude Code.
+`issue-pilot@ingeotec` from it. The install is a copy, not a link, and
+`/plugin update` only acts on a version bump — so while iterating on the same
+version, `/plugin uninstall issue-pilot@ingeotec` and `/plugin install
+issue-pilot@ingeotec` again, then restart Claude Code.
 
 ## Changing a command file
 

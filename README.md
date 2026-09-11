@@ -362,8 +362,15 @@ install from it:
 ```
 
 Claude Code copies the plugin into its cache at install time, so edits to the
-checkout are not live: after a change, `/plugin marketplace update ingeotec`
-and then `/plugin update issue-pilot@ingeotec`, and restart.
+checkout are not live — and `/plugin update` only acts when the version in
+`plugin.json` has changed. While iterating on the same version, reinstall:
+
+```
+/plugin uninstall issue-pilot@ingeotec
+/plugin install issue-pilot@ingeotec
+```
+
+and restart Claude Code.
 
 No dependencies beyond the standard library: the tests run the real scripts
 against a throwaway git repository, a fake `gh` and a fake `curl`, so what is
