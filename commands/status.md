@@ -31,7 +31,7 @@ Report the state of the issue-pilot run in this repository.
    actual error, not just "it failed".
 
 4. Summarise for the reader, briefly: what is done, what is pending, whether the
-   driver is still running, what the next step is (`/issue-pilot:issues-pr` when
+   driver is still running, what the next step is (`/issue-pilot:pr` when
    everything is done, `issues_run.sh --resume --detach` when something is
    blocked), and whether the usage windows allow it now.
 

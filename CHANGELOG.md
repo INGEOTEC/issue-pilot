@@ -6,6 +6,16 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the commands drop the `issue-`/`issues-` prefix that
+  repeated the plugin namespace: `/issue-pilot:plan`, `/issue-pilot:run`,
+  `/issue-pilot:status`, `/issue-pilot:pr`, `/issue-pilot:close`,
+  `/issue-pilot:one` (was `issue-plan`, `issues`, `issues-status`,
+  `issues-pr`, `issues-close`, `issues-one`). `/issue-pilot:init` is
+  unchanged. There are no aliases; a run started before the upgrade keeps
+  its state file and finishes on the new names.
+
 ## [0.1.0] - 2026-09-11
 
 First public release.

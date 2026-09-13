@@ -6,6 +6,7 @@ cleared, when a dead session is continued, when a run stops for good, and what i
 refuses to start.
 """
 import json
+import os
 import time
 import unittest
 
@@ -30,7 +31,7 @@ class Run(PilotTestCase):
     def test_a_run_implements_every_issue_and_stops_at_the_pull_request(self):
         out = self.run_driver("--no-interview", "1", "2", check=True)
         self.assertEqual(self.state()["status"], {"1": "done", "2": "done"})
-        self.assertIn("issues-pr", out.stdout)
+        self.assertIn("/issue-pilot:pr", out.stdout)
         # One pull request at the end means the driver must not open one itself.
         self.assertNotIn("pr create", out.stdout)
 
@@ -56,7 +57,7 @@ class Run(PilotTestCase):
         self.run_driver("--pr", "--no-interview", "1", check=True)
         # issue #1, then the pull request session -- both with the work checked out.
         self.assertEqual(self.claude_branches(), ["issues-1", "issues-1"])
-        self.assertIn("issues-pr", self.claude_calls()[-1][1])
+        self.assertIn("/issue-pilot:pr", self.claude_calls()[-1][1])
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
 
     def test_a_run_that_stops_early_stays_where_the_unfinished_work_is(self):
@@ -295,19 +296,23 @@ class Run(PilotTestCase):
         logdir = self.home / "logs" / "issues-1-2"
         self.assertTrue((logdir / "driver.pid").exists())
 
+        pid = int((logdir / "driver.pid").read_text().strip())
         deadline = time.time() + 60
         while time.time() < deadline:
-            status = json.loads(
-                self.run_script("issues_state.py", "show", check=False).stdout
-                or "{}").get("status", {})
-            if status and all(v == "done" for v in status.values()):
+            try:
+                os.kill(pid, 0)
+            except OSError:
                 break
             time.sleep(0.5)
         else:
             self.fail("the detached run never finished:\n" +
                       (logdir / "driver.log").read_text())
 
-        self.assertIn("issues-pr", (logdir / "driver.log").read_text())
+        status = json.loads(
+            self.run_script("issues_state.py", "show", check=False).stdout
+            or "{}").get("status", {})
+        self.assertEqual(status, {"1": "done", "2": "done"})
+        self.assertIn("/issue-pilot:pr", (logdir / "driver.log").read_text())
 
 
 if __name__ == "__main__":

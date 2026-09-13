@@ -142,7 +142,7 @@ class RunState(PilotTestCase):
                         "--closes-automatically")
         out = self.run_script("issues_state.py", "status").stdout
         self.assertIn("https://gh/pr/7 -> main", out)
-        self.assertNotIn("issues-close", out)
+        self.assertNotIn("/issue-pilot:close", out)
 
     def test_a_pull_request_elsewhere_says_the_issues_must_be_closed(self):
         # GitHub only honours "Closes #n" on a merge into the default branch.
@@ -152,12 +152,12 @@ class RunState(PilotTestCase):
                         "--number", "7", "--base", "develop")
         out = self.run_script("issues_state.py", "status").stdout
         self.assertIn("will NOT close the issues", out)
-        self.assertIn("issues-close", out)
+        self.assertIn("/issue-pilot:close", out)
 
     def test_status_points_at_the_pull_request_when_everything_is_done(self):
         self.init(1)
         self.run_script("issues_state.py", "done", "1")
-        self.assertIn("issues-pr", self.run_script("issues_state.py", "status").stdout)
+        self.assertIn("/issue-pilot:pr", self.run_script("issues_state.py", "status").stdout)
 
 
 if __name__ == "__main__":

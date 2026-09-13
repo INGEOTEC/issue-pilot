@@ -9,7 +9,7 @@ session with nobody to ask will not notice.  So the planning side records the
 commit in the issue itself, and the run side reads it back and works out what
 changed in between, while there is still a person to ask about it.
 
-  issue_base.py stamp             the line /issue-pilot:issue-plan ends an issue with
+  issue_base.py stamp             the line /issue-pilot:plan ends an issue with
   issue_base.py drift 165 166     per issue: the commit it was planned against,
                                   and what has landed on the base branch since
 

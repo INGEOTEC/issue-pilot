@@ -30,7 +30,7 @@
 #   usage-guard.sh            hook mode: measure, then wait or halt
 #   usage-guard.sh --check    probe now regardless of the interval, print JSON,
 #                             never sleep, never block (used by the run driver
-#                             and by /issue-pilot:issues-status)
+#                             and by /issue-pilot:status)
 #   usage-guard.sh --clear    forget a recorded halt
 
 set -uo pipefail
@@ -66,7 +66,7 @@ now=$(date +%s)
 # A halt already on record is final for the sessions of an autonomous run: they
 # stop at the very next tool call, before spending another five minutes of a
 # window that is nearly gone.  An interactive session is left alone -- a person
-# can see the halt in /issue-pilot:issues-status and decide for themselves.  The
+# can see the halt in /issue-pilot:status and decide for themselves.  The
 # run driver marks its sessions with ISSUE_PILOT_RUN.
 if [ "$MODE" = hook ] && [ -n "${ISSUE_PILOT_RUN:-}" ] && [ -r "$HALT" ]; then
   cat >&2 <<MSG

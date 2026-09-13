@@ -80,5 +80,5 @@ Show the final configuration, say what you inferred versus what the user chose,
 and point at the next step:
 
 ```
-/issue-pilot:issue-plan <what you want built>
+/issue-pilot:plan <what you want built>
 ```

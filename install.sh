@@ -7,7 +7,7 @@
 #
 # It copies the toolkit to ~/.claude/issue-pilot/lib and writes the commands to
 # ~/.claude/commands/issue-pilot/, so they are invoked exactly as they are under
-# the plugin: /issue-pilot:issues, /issue-pilot:issue-plan, and so on.  The
+# the plugin: /issue-pilot:run, /issue-pilot:plan, and so on.  The
 # ${CLAUDE_PLUGIN_ROOT} the commands refer to is rewritten to that lib path,
 # since outside a plugin nothing would define it.
 #
@@ -59,7 +59,7 @@ done
 
 echo "installed:"
 echo "  toolkit  -> $LIB"
-echo "  commands -> $COMMANDS  (/issue-pilot:issues, /issue-pilot:issue-plan, ...)"
+echo "  commands -> $COMMANDS  (/issue-pilot:run, /issue-pilot:plan, ...)"
 
 if [[ $WITH_HOOK -eq 1 ]]; then
   python3 - "$SETTINGS" "$LIB" "$SRC/hooks/hooks.json" <<'PY'
@@ -100,11 +100,11 @@ else
   cat <<EOF
 
 The hooks are not registered. To have the usage guard watch your usage windows
-and /issue-pilot:issue-plan refuse an empty request, either re-run with --hook,
+and /issue-pilot:plan refuse an empty request, either re-run with --hook,
 or copy the entries from $SRC/hooks/hooks.json into the "hooks" section of
 $SETTINGS, replacing \${CLAUDE_PLUGIN_ROOT} with $LIB.
 EOF
 fi
 
 echo
-echo "Restart Claude Code, then try:  /issue-pilot:issue-plan <what you want built>"
+echo "Restart Claude Code, then try:  /issue-pilot:plan <what you want built>"

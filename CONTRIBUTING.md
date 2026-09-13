@@ -54,7 +54,7 @@ issue-pilot@ingeotec` again, then restart Claude Code.
 The files in `commands/` are prompts, and they are the only instructions an
 unattended session gets. Two habits pay off there:
 
-- Say *why*, not just what. Several of the rules in `issues-one.md` exist
+- Say *why*, not just what. Several of the rules in `one.md` exist
   because a run died; the reason is what keeps a later editor from removing
   them.
 - Refer to scripts as `${CLAUDE_PLUGIN_ROOT}/scripts/...`. `install.sh` rewrites

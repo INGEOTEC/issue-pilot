@@ -250,7 +250,7 @@ def cmd_status(args):
         print(f"pull req   : {pr['url']} -> {pr['base']}")
         if not pr.get("closes_automatically"):
             print("             merging this will NOT close the issues (the base is not")
-            print("             the default branch); run /issue-pilot:issues-close after.")
+            print("             the default branch); run /issue-pilot:close after.")
         print()
 
     blocked = state.get("blocked")
@@ -259,7 +259,7 @@ def cmd_status(args):
         print(f"logs: {log_dir(state)}")
         print("retry it with: issues_run.sh --resume")
     elif all(v == "done" for v in state["status"].values()):
-        print("every issue is done -- open the pull request with /issue-pilot:issues-pr")
+        print("every issue is done -- open the pull request with /issue-pilot:pr")
     else:
         pending = [n for n, v in state["status"].items() if v == "pending"]
         print(f"pending: {', '.join('#' + n for n in pending)}")

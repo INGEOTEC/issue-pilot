@@ -89,7 +89,7 @@ class UsageGuard(PilotTestCase):
         self.assertIn("--clear", out.stderr)
 
     def test_a_recorded_halt_leaves_an_interactive_session_alone(self):
-        # A person can read the halt in issues-status and decide; a hook that
+        # A person can read the halt in /issue-pilot:status and decide; a hook that
         # locked them out of Claude Code entirely would be worse than no guard.
         self.halt_file.write_text("7d window at 95%\n")
         out = self.guard(headers=self.headers(**{"5h": (0.1, 3600)}))

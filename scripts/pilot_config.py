@@ -50,7 +50,7 @@ DEFAULTS = {
     "effort": ("high", "Effort level of those sessions."),
     "max_attempts": (3, "Attempts on one issue before the run stops."),
     "pr_draft": (False, "Open the final pull request as a draft."),
-    "issue_labels": ([], "Labels applied to issues opened by /issue-plan."),
+    "issue_labels": ([], "Labels applied to issues opened by /issue-pilot:plan."),
 }
 
 # Where run state and logs live.  Not part of the per-repo config: it is a
