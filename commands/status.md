@@ -31,8 +31,9 @@ Report the state of the issue-pilot run in this repository.
    actual error, not just "it failed".
 
 4. Summarise for the reader, briefly: what is done, what is pending, whether the
-   driver is still running, what the next step is (`/issue-pilot:pr` when
-   everything is done, `issues_run.sh --resume --detach` when something is
+   driver is still running, the model and effort level the run's sessions are
+   using (when the state has them), what the next step is (`/issue-pilot:pr`
+   when everything is done, `issues_run.sh --resume --detach` when something is
    blocked), and whether the usage windows allow it now.
 
 Do not implement anything, do not modify the run state, and do not wait for a

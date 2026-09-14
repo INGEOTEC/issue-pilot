@@ -376,6 +376,8 @@ EOF
   echo "run initialised on branch $BRANCH"
 fi
 
+python3 "$STATE" engine --model "$MODEL" --effort "$EFFORT" >/dev/null
+
 python3 "$STATE" show | python3 -c '
 import json, sys
 for i in json.load(sys.stdin)["plan"]:
