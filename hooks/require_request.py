@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse /issue-pilot:issue-plan with nothing to plan.
+"""Refuse /issue-pilot:plan with nothing to plan.
 
 A UserPromptSubmit hook.  The command's own instructions say the same thing,
 but an instruction can be argued with and a hook cannot: the prompt never
@@ -9,7 +9,7 @@ empty request is the model guessing what somebody might have wanted, which is
 exactly the failure this workflow exists to prevent.
 
 Reads the hook payload on stdin and exits 2 -- block, show stderr -- when the
-prompt is the issue-plan command with no request after it.  Anything else,
+prompt is the plan command with no request after it.  Anything else,
 including a payload it cannot parse, exits 0: this hook must never get in the
 way of any other prompt.
 """
@@ -17,18 +17,18 @@ import json
 import re
 import sys
 
-MESSAGE = """issue-pilot: /issue-pilot:issue-plan needs to be told what to plan.
+MESSAGE = """issue-pilot: /issue-pilot:plan needs to be told what to plan.
 
   The plan is written from what you say, not from a guess at what you might
   want.  Give it the request in a sentence or two:
 
-    /issue-pilot:issue-plan add a --format flag to the export command
-    /issue-pilot:issue-plan --update 42     (rewrite an existing issue instead)
+    /issue-pilot:plan add a --format flag to the export command
+    /issue-pilot:plan --update 42     (rewrite an existing issue instead)
 """
 
-# Installed as a plugin the command is /issue-pilot:issue-plan; installed by
+# Installed as a plugin the command is /issue-pilot:plan; installed by
 # hand it has the same name, so one pattern covers both.
-COMMAND = re.compile(r"^/issue-pilot:issue-plan\b(.*)$", re.DOTALL)
+COMMAND = re.compile(r"^/issue-pilot:plan\b(.*)$", re.DOTALL)
 # `--update <n>` is a complete request on its own: the issue supplies the text.
 UPDATE = re.compile(r"^--update\s+#?\d+\b")
 

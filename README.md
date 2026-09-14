@@ -76,9 +76,9 @@ one per issue.
 ```
   /issue-pilot:init        ->  .issue-pilot.json, once per repository
               |
-  /issue-pilot:issue-plan  ->  a well-formed issue on GitHub
+  /issue-pilot:plan  ->  a well-formed issue on GitHub
               |
-  /issue-pilot:issues 165 166 170
+  /issue-pilot:run 165 166 170
               |
       the asking: your session reads every issue and asks you everything it
               needs, once, and writes the answers to disk.  Then it starts the
@@ -88,11 +88,11 @@ one per issue.
               plan says the issue is independent; resumed when it is not.
               Implement -> test -> commit -> comment -> mark done.
               |
-     the close: /issue-pilot:issues-pr  ->  one pull request, Closes #165 #166 #170
+     the close: /issue-pilot:pr  ->  one pull request, Closes #165 #166 #170
               |
               |  (only if the base branch is not the repository's default one)
               v
-  /issue-pilot:issues-close  ->  the issues closed by hand, after the merge
+  /issue-pilot:close  ->  the issues closed by hand, after the merge
 ```
 
 Start once per repository, by saying what this project's tests are:
@@ -110,11 +110,11 @@ notices: a repository whose tests live in `tests/test_*.py` but are written with
 Then write the issue:
 
 ```
-/issue-pilot:issue-plan add a --format flag to the export command
+/issue-pilot:plan add a --format flag to the export command
 ```
 
 The request is not optional, and that is enforced by a hook rather than asked
-for: `/issue-pilot:issue-plan` with nothing after it is refused before it
+for: `/issue-pilot:plan` with nothing after it is refused before it
 reaches the model. The plan is written from what you say; a plan produced from
 an empty request would be a guess at what you might have wanted, which is the
 one thing this workflow exists to rule out.
@@ -130,7 +130,7 @@ prints the command to implement it.
 Then run it:
 
 ```
-/issue-pilot:issues 165 166 170
+/issue-pilot:run 165 166 170
 ```
 
 That session puts the repository on the base branch again, at origin's tip,
@@ -142,7 +142,7 @@ you the prompt back. It takes hours; you are not meant to sit in front of it.
 Check on it at any time, from any session:
 
 ```
-/issue-pilot:issues-status
+/issue-pilot:status
 ```
 
 ```
@@ -162,7 +162,7 @@ pending: #170
 ## How the run behaves
 
 **All the asking happens before the run starts.** Everything after it has nobody
-to answer, so `/issue-pilot:issues` reads every issue in the list, reads
+to answer, so `/issue-pilot:run` reads every issue in the list, reads
 `CLAUDE.md` and the code, and asks all of its questions at once, in the session
 you are sitting in. The answers go to a file and are passed to every autonomous
 session as `--notes` — they are the only thing that survives the clearing between
@@ -171,7 +171,7 @@ issues.
 **The run itself is detached.** It is started with `--detach`, in a session of
 its own, so it outlives both the tool call that started it and the conversation
 it was started from. You get the branch and a log path back immediately, and
-follow it with `/issue-pilot:issues-status`. Started from a terminal instead, the
+follow it with `/issue-pilot:status`. Started from a terminal instead, the
 driver can conduct the interview itself; that is the only path that needs a TTY.
 
 **Conversations are addressed by id.** Dependent issues and retries go back to
@@ -192,17 +192,17 @@ Never one branch per issue, and never a pull request per issue.
 **And you end up back on it.** When the run finishes, the driver checks the base
 branch out again: the work is on the run branch, pushed by the pull request
 step, and a repository left on `issues-165-166-170` looks a week later like
-somebody is still working there. `/issue-pilot:issues-pr` does the same after
-opening the pull request, and `/issue-pilot:issues-close` pulls the merge and
+somebody is still working there. `/issue-pilot:pr` does the same after
+opening the pull request, and `/issue-pilot:close` pulls the merge and
 deletes the local run branch once everything on it is on origin. A run that
 stops early — a blocker, a session that kept dying — stays on its branch, where
 the unfinished work is.
 
 **Planning happens on the same code, and the issue remembers which.**
-`/issue-pilot:issue-plan` puts the repository on the base branch at origin's
+`/issue-pilot:plan` puts the repository on the base branch at origin's
 tip before it reads anything — not on the feature branch you happened to be on
 — and ends the issue with the commit the plan was read against. Days later,
-`/issue-pilot:issues` reads that commit back and lists what has landed on the
+`/issue-pilot:run` reads that commit back and lists what has landed on the
 base branch since, and which files it touched, so a plan that names a file
 that has moved or a behaviour another change already altered is caught in the
 one session that still has somebody to ask.
@@ -293,7 +293,7 @@ Every setting can be overridden for a single run by an environment variable
 | `effort` | `high` | Effort level of those sessions. |
 | `max_attempts` | `3` | Attempts on one issue before the run stops. |
 | `pr_draft` | `false` | Open the final pull request as a draft. |
-| `issue_labels` | `[]` | Labels applied to issues opened by `/issue-pilot:issue-plan`. |
+| `issue_labels` | `[]` | Labels applied to issues opened by `/issue-pilot:plan`. |
 
 `ISSUE_PILOT_HOME` (default `~/.claude/issue-pilot`) is where state and logs live.
 
@@ -302,12 +302,12 @@ Every setting can be overridden for a single run by an environment variable
 | Command | What it does |
 |---|---|
 | `/issue-pilot:init` | Configures issue-pilot for this repository. Run it once, before anything else. |
-| `/issue-pilot:issue-plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
-| `/issue-pilot:issues <n>...` | Asks you everything the run needs, then starts it in the background. |
-| `/issue-pilot:issues-status` | The run in plain words, plus how much usage window is left. |
-| `/issue-pilot:issues-pr` | Opens the single pull request, if every issue is done. |
-| `/issue-pilot:issues-close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
-| `/issue-pilot:issues-one <n>` | One issue. Called by the driver; you rarely run it yourself. |
+| `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
+| `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
+| `/issue-pilot:status` | The run in plain words, plus how much usage window is left. |
+| `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
+| `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
+| `/issue-pilot:one <n>` | One issue. Called by the driver; you rarely run it yourself. |
 
 The driver underneath, for the times you want it directly:
 
@@ -338,18 +338,18 @@ the issues stay open, and it is easy not to notice for weeks.
 
 issue-pilot compares the run's base branch against the repository's default
 branch when it opens the pull request, records which case it is, and says so
-in `/issue-pilot:issues-status`:
+in `/issue-pilot:status`:
 
 ```
 pull req   : https://github.com/you/project/pull/42 -> develop
              merging this will NOT close the issues (the base is not
-             the default branch); run /issue-pilot:issues-close after.
+             the default branch); run /issue-pilot:close after.
 ```
 
 After the merge:
 
 ```
-/issue-pilot:issues-close
+/issue-pilot:close
 ```
 
 which checks the pull request really is merged, comments on each issue with the
@@ -360,7 +360,7 @@ close anything for an unmerged pull request unless you pass `--force`.
 
 The autonomous session has your issue and nothing else. The difference between a
 run that works and one that stalls is almost always in the issue, so
-`/issue-pilot:issue-plan` exists to write them — but if you write your own:
+`/issue-pilot:plan` exists to write them — but if you write your own:
 
 - Say what is **out** of scope. That is what stops an unattended session from
   wandering into a refactor.

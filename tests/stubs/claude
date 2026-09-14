@@ -30,7 +30,7 @@ with open(os.environ["FAKE_CLAUDE_LOG"] + ".branch", "a") as fh:
                             capture_output=True, text=True).stdout)
 
 prompt = argv[argv.index("-p") + 1] if "-p" in argv else ""
-found = re.search(r"issues-one (\d+)", prompt) or re.search(r"#(\d+)", prompt)
+found = re.search(r"/issue-pilot:one (\d+)", prompt) or re.search(r"#(\d+)", prompt)
 issue = found.group(1) if found else None
 
 plan = json.loads(os.environ.get("FAKE_CLAUDE_PLAN", "[]"))

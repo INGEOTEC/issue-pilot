@@ -18,7 +18,7 @@ Closing them is then a separate act, and this is it.
    ```
 
    If there is no `pull_request` in the state, stop: the run has not reached
-   `/issue-pilot:issues-pr` yet.
+   `/issue-pilot:pr` yet.
 
    If `pull_request.closes_automatically` is true, stop and say so — GitHub has
    already closed them, or will when the pull request merges. Closing them by

@@ -26,7 +26,7 @@
 #
 # A run outlives any single command, so it can also be started detached: with
 # --detach the driver relaunches itself in its own session, prints where its log
-# is, and returns at once.  That is how /issue-pilot:issues starts it, since a
+# is, and returns at once.  That is how /issue-pilot:run starts it, since a
 # run takes hours and no tool call lives that long.  A detached run has nobody to
 # interview, so it needs the answers up front (--notes-file / --notes) or none at
 # all (--no-interview).
@@ -263,7 +263,7 @@ MSG
 run started in the background (pid $pid)
   branch : $BRANCH
   log    : $driver_log
-Follow it with /issue-pilot:issues-status, or: tail -f "$driver_log"
+Follow it with /issue-pilot:status, or: tail -f "$driver_log"
 MSG
   exit 0
 fi
@@ -430,7 +430,7 @@ while next_json=$(python3 "$STATE" next); do
     before="$(fingerprint)"
 
     if [[ $attempt -eq 1 ]]; then
-      prompt="/issue-pilot:issues-one $issue"
+      prompt="/issue-pilot:one $issue"
     else
       # A session that exits with the issue still pending has almost always
       # ended its turn while work was in flight, not hit a real blocker: the
@@ -524,11 +524,11 @@ done
 if [[ $OPEN_PR -eq 1 ]]; then
   echo "=== opening the pull request ==="
   # The pull request needs the state and the git log, not anybody's context.
-  claude -p "/issue-pilot:issues-pr" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits \
+  claude -p "/issue-pilot:pr" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits \
     --session-id "$(new_session)" \
     --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$LOGDIR/pull-request.log"
 else
-  echo "all issues implemented; open the pull request with: /issue-pilot:issues-pr"
+  echo "all issues implemented; open the pull request with: /issue-pilot:pr"
 fi
 
 # ------------------------------------------------------------ hand the tree back

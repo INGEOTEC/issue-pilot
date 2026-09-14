@@ -61,7 +61,7 @@ Then find out how much the code has moved since each issue was written:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issue_base.py" drift $ARGUMENTS
 ```
 
-`/issue-pilot:issue-plan` ends every issue it writes with the commit of the
+`/issue-pilot:plan` ends every issue it writes with the commit of the
 base branch the plan was read against. This prints, per issue, whether that
 commit is still the tip or which commits have landed since, and which files
 they touched. For an issue that is behind, read those commits next to the
@@ -118,7 +118,7 @@ log path.
 
 The driver syncs the base branch with origin once more, exactly as step 1 did,
 and cuts the run branch from it right before the first
-`/issue-pilot:issues-one` — never from whatever happens to be checked out. The
+`/issue-pilot:one` — never from whatever happens to be checked out. The
 base branch comes from `.issue-pilot.json` or from the repository's default
 branch on GitHub; do not guess it yourself, and do not pass `--from-head`
 unless the user explicitly asks to start from the local checkout.
@@ -127,7 +127,7 @@ unless the user explicitly asks to start from the local checkout.
 
 Tell the user, briefly: the branch, the driver's log path, the questions you
 decided yourself and with what defaults, and that the run is now in the
-background. Point them at `/issue-pilot:issues-status` to follow it.
+background. Point them at `/issue-pilot:status` to follow it.
 
 Do not tail the log waiting for the run to finish, and do not start implementing
 anything yourself.
@@ -158,7 +158,7 @@ anything yourself.
   independent ones, resuming the run's own conversation by id for the dependent
   ones — never "the most recent conversation in this directory", which during a
   run is whichever one you opened last. For each issue it
-  invokes `/issue-pilot:issues-one <n>`, which implements, tests, commits and
+  invokes `/issue-pilot:one <n>`, which implements, tests, commits and
   comments on the issue. It only moves on when the issue is `done`.
 
 - **The model.** Every autonomous session runs on the model and effort level in
@@ -195,7 +195,7 @@ conversation, and why:
 Inspect or resume, at any time:
 
 ```bash
-/issue-pilot:issues-status                                    # the run, in plain words
+/issue-pilot:status  # the run, in plain words
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" next  # what is next
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" unblock
 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --resume --detach  # retry the blocked issue
@@ -207,8 +207,8 @@ it returns to the run branch before continuing.
 ## Phase 3 — pull request
 
 Only if **every** issue in the list is implemented and green
-(`/issue-pilot:issues-status` with no `blocked` and everything `done`). Run it
-with `/issue-pilot:issues-pr`, or pass `--pr` to the driver to have it done at
+(`/issue-pilot:status` with no `blocked` and everything `done`). Run it
+with `/issue-pilot:pr`, or pass `--pr` to the driver to have it done at
 the end of the run. Either way the repository is left on the base branch
 afterwards, with the work on the pushed run branch.
 

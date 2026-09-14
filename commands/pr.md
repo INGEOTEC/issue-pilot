@@ -85,5 +85,5 @@ Close the issue-pilot run by opening **one single** pull request.
 
 7. Report the pull request URL. When the base is not the default branch, say
    plainly that merging will not close the issues and that
-   `/issue-pilot:issues-close` does it once the pull request is merged. Do not
+   `/issue-pilot:close` does it once the pull request is merged. Do not
    close them now: the work is not merged yet.

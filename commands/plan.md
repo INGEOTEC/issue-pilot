@@ -12,14 +12,14 @@ If `$ARGUMENTS` is empty, or is `--update` with no issue number, **stop**. Do
 not explore the code to work out what might be wanted, do not ask a round of
 questions to reconstruct a request, do not propose something plausible. Say, in
 two lines, that the command needs the request written out —
-`/issue-pilot:issue-plan <what you want built>` — and end there.
+`/issue-pilot:plan <what you want built>` — and end there.
 
 The rule holds for the rest of this command too: the plan is built **from what
 was said**. Questions in step 3 sharpen the stated request; they never replace
 it. Where the request is silent, decide a default and record it as a decision —
 but where the request is *absent*, there is nothing to decide about.
 
-This is the front half of issue-pilot. `/issue-pilot:issues` will later hand this
+This is the front half of issue-pilot. `/issue-pilot:run` will later hand this
 issue to a session that has **nobody to ask** — so everything that session will
 need has to be decided here, while you still have a person in front of you.
 
@@ -124,7 +124,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issue_base.py" stamp
 
 It records the commit this plan was read against. When the issue is finally
 implemented, days and several merged pull requests later,
-`/issue-pilot:issues` reads it back and works out what has landed on the base
+`/issue-pilot:run` reads it back and works out what has landed on the base
 branch since — which is how a plan that names a file that has since moved, or
 a behaviour another change already altered, gets caught while there is still a
 person to ask. With `--update`, replace the stamp the issue already carries:
@@ -156,7 +156,7 @@ them as described above.
 Print the issue URLs and the exact command to implement them:
 
 ```
-/issue-pilot:issues <n> [<n> ...]
+/issue-pilot:run <n> [<n> ...]
 ```
 
 Also say, in one line each, which questions you decided yourself and what the
