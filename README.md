@@ -148,6 +148,7 @@ Check on it at any time, from any session:
 ```
 repository : /home/you/project
 branch     : issues-165-166-170 (off develop at 3c9d1e2f0)
+model      : sonnet, effort high
 
  + #165    done     fresh=True  depends=-        attempts=1 commit=a1b2c3d4e
      Extract the reader into its own module

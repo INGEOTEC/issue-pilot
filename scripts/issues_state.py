@@ -13,6 +13,8 @@ Subcommands
         commit of the base branch the run branch was cut from.
   next  Prints the next pending issue and whether the conversation must be
         cleared before starting it.  Exits 3 when the run is finished.
+  engine --model M --effort E   Records the model and effort level the run's
+        sessions are being launched on.
   attempt <n>                 Records another attempt on an issue.
   session <uuid>              Records the conversation the run is currently in.
   done <n> [--commit SHA]     Marks an issue implemented.
@@ -144,6 +146,14 @@ def cmd_next(args):
     sys.exit(3)
 
 
+def cmd_engine(args):
+    state = load()
+    state["model"] = args.model
+    state["effort"] = args.effort
+    save(state)
+    print(f"engine recorded: model={args.model} effort={args.effort}")
+
+
 def cmd_session(args):
     state = load()
     state["session"] = args.uuid
@@ -225,6 +235,10 @@ def cmd_status(args):
     if state.get("base_commit"):
         off += f" at {state['base_commit'][:9]}"
     print(f"branch     : {state.get('branch')} (off {off})")
+    model = state.get("model")
+    if model:
+        effort = state.get("effort")
+        print(f"model      : {model}, effort {effort}" if effort else f"model      : {model}")
     print(f"started    : {state.get('created_at', '?')}")
     running = driver(state)
     if running:
@@ -285,6 +299,11 @@ def main():
     p.set_defaults(func=cmd_init)
 
     sub.add_parser("next").set_defaults(func=cmd_next)
+
+    p = sub.add_parser("engine")
+    p.add_argument("--model", required=True)
+    p.add_argument("--effort", required=True)
+    p.set_defaults(func=cmd_engine)
 
     p = sub.add_parser("session"); p.add_argument("uuid")
     p.set_defaults(func=cmd_session)

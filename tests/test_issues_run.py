@@ -110,6 +110,22 @@ class Run(PilotTestCase):
         self.assertEqual(call[call.index("--model") + 1], "opus")
         self.assertEqual(call[call.index("--effort") + 1], "low")
 
+    def test_the_state_records_the_model_the_run_is_using(self):
+        # The same value the sessions were actually launched on, so the two
+        # cannot drift apart.
+        self.write_config({"test_command": "true", "model": "opus", "effort": "low"})
+        self._git("push", "-q", "origin", "main")
+        self.run_driver("--no-interview", "1", check=True)
+        self.assertEqual(self.state()["model"], "opus")
+        self.assertEqual(self.state()["effort"], "low")
+
+    def test_a_resumed_run_re_records_the_model_from_the_current_configuration(self):
+        self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
+        self.write_config({"test_command": "true", "model": "opus", "effort": "low"})
+        self.run_driver("--resume", check=True)
+        self.assertEqual(self.state()["model"], "opus")
+        self.assertEqual(self.state()["effort"], "low")
+
     def test_the_autonomy_rules_reach_every_session(self):
         self.run_driver("--no-interview", "1", check=True)
         call = self.claude_calls()[0]

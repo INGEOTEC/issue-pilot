@@ -159,6 +159,27 @@ class RunState(PilotTestCase):
         self.run_script("issues_state.py", "done", "1")
         self.assertIn("/issue-pilot:pr", self.run_script("issues_state.py", "status").stdout)
 
+    def test_engine_records_the_model_and_status_reads_it_back(self):
+        self.init()
+        self.run_script("issues_state.py", "engine", "--model", "opus", "--effort", "low")
+        state = self.state()
+        self.assertEqual(state["model"], "opus")
+        self.assertEqual(state["effort"], "low")
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn("model      : opus, effort low", out)
+
+    def test_status_says_nothing_about_the_model_when_it_was_never_recorded(self):
+        # A state file written before `engine` existed has no such field, and
+        # must still print a full, correct status -- this is the regression
+        # that matters, since status is the one command people run to find out
+        # what a half-finished run is doing.
+        self.init()
+        state = self.state()
+        self.assertNotIn("model", state)
+        out = self.run_script("issues_state.py", "status")
+        self.assertEqual(out.returncode, 0)
+        self.assertNotIn("model", out.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
