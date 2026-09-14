@@ -6,6 +6,23 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-14
+
+### Added
+
+- `/issue-pilot:status` now reports the model and effort level the run's
+  sessions are being launched on. The driver records them in the run state
+  when it starts handing out issues, and again on a `--resume`, so what is
+  reported is what the sessions are really using rather than what
+  `.issue-pilot.json` happens to say now; `scripts/issues_state.py` gained an
+  `engine` subcommand for it. A state file written before this release has no
+  such field and simply prints no model line.
+- The README now covers updating and uninstalling the plugin on both install
+  paths, including what an uninstall leaves behind — the hook entries in
+  `~/.claude/settings.json`, the state and logs under `ISSUE_PILOT_HOME`, and
+  each repository's `.issue-pilot.json` — and `/issue-pilot:status` now
+  appears in the loop diagram.
+
 ### Changed
 
 - **Breaking:** the commands drop the `issue-`/`issues-` prefix that
@@ -73,5 +90,6 @@ First public release.
 - Tests covering the dependency rule, the run state, configuration precedence
   and the guard's decisions, using only the standard library.
 
-[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.1.0
