@@ -71,6 +71,68 @@ once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is
 not enough: that token is not passed to subprocesses, and the driver launches
 one per issue.
 
+## Update
+
+Plugin install: refresh the marketplace before updating, since
+`/plugin update` only acts when the version in `plugin.json` has changed —
+otherwise it has nothing to do.
+
+```
+/plugin marketplace update ingeotec
+/plugin update issue-pilot@ingeotec
+```
+
+Restart Claude Code afterwards: the commands and hooks are loaded at start-up.
+
+Plain-files install: pull the checkout and re-run the installer, with `--hook`
+again if you registered the hooks the first time. It overwrites the copy under
+`~/.claude/issue-pilot/lib` and the commands in `~/.claude/commands/issue-pilot/`,
+and rewrites the hook entries in `settings.json` in place, keeping a
+`.issue-pilot.bak`:
+
+```bash
+git pull
+./install.sh --hook
+```
+
+Neither path touches `.issue-pilot.json` in your repositories or the run state
+under `ISSUE_PILOT_HOME`, so a run in progress survives an update of the
+tooling. Iterating on a local checkout at an unchanged version is a different
+problem, covered in **Developing**.
+
+## Uninstall
+
+Plugin install:
+
+```
+/plugin uninstall issue-pilot@ingeotec
+/plugin marketplace remove ingeotec   # only if you do not want the marketplace either
+```
+
+Restart Claude Code afterwards.
+
+Plain-files install, from the checkout:
+
+```bash
+./install.sh --uninstall
+```
+
+which removes `~/.claude/issue-pilot/lib` and `~/.claude/commands/issue-pilot`.
+
+**What is left behind**, on either path, because nobody discovers this on
+their own:
+
+- The hook entries in `~/.claude/settings.json` — the `PreToolUse` usage guard
+  and the `UserPromptSubmit` request check — have to be removed by hand.
+- The run state and logs under `ISSUE_PILOT_HOME` (`~/.claude/issue-pilot`,
+  holding `state/` and `logs/`) are deliberately kept; delete them yourself once
+  no run matters.
+- `.issue-pilot.json` in each repository is a project file that neither path
+  touches.
+
+Uninstalling does not stop a run in progress — the detached driver is a
+process of its own — so finish or kill it first.
+
 ## The loop
 
 ```
@@ -87,6 +149,9 @@ one per issue.
       the doing: one issue at a time, unattended.  Fresh conversation when the
               plan says the issue is independent; resumed when it is not.
               Implement -> test -> commit -> comment -> mark done.
+              |
+              |    `--->  /issue-pilot:status  ->  where the run is right now,
+              |                  from any session, while it runs
               |
      the close: /issue-pilot:pr  ->  one pull request, Closes #165 #166 #170
               |
