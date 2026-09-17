@@ -5,9 +5,13 @@ order, that a blocked run stops, that `--resume` can reopen it -- so these tests
 are really tests of the driver's control flow.
 """
 import json
+import pathlib
+import shutil
+import subprocess
+import sys
 import unittest
 
-from support import PilotTestCase, issue
+from support import SCRIPTS, PilotTestCase, issue
 
 
 class RunState(PilotTestCase):
@@ -179,6 +183,29 @@ class RunState(PilotTestCase):
         out = self.run_script("issues_state.py", "status")
         self.assertEqual(out.returncode, 0)
         self.assertNotIn("model", out.stdout)
+
+    def test_status_names_the_running_version_and_where_it_runs_from(self):
+        # Not hardcoded: this very commit changes the version, and a literal
+        # would fail again at every future release.
+        self.init()
+        manifest = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn(f"issue-pilot: {manifest['version']}", out)
+        self.assertIn(str(SCRIPTS.parent), out)
+
+    def test_status_on_a_copy_with_no_manifest_reports_the_version_as_unknown(self):
+        # The pre-change install.sh layout: scripts/ and hooks/, no
+        # .claude-plugin/ beside them.  Status must still work, not merely
+        # avoid a traceback.
+        self.init()
+        lib = pathlib.Path(self.tmp.name) / "lib"
+        shutil.copytree(SCRIPTS, lib / "scripts")
+        out = subprocess.run(
+            [sys.executable, str(lib / "scripts" / "issues_state.py"), "status"],
+            cwd=self.repo, capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("issue-pilot: unknown", out.stdout)
+        self.assertIn(str(lib), out.stdout)
 
 
 if __name__ == "__main__":

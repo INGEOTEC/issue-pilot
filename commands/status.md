@@ -30,11 +30,12 @@ Report the state of the issue-pilot run in this repository.
    the run stopped on a blocked issue, summarise **why** from that log: the
    actual error, not just "it failed".
 
-4. Summarise for the reader, briefly: what is done, what is pending, whether the
-   driver is still running, the model and effort level the run's sessions are
-   using (when the state has them), what the next step is (`/issue-pilot:pr`
-   when everything is done, `issues_run.sh --resume --detach` when something is
-   blocked), and whether the usage windows allow it now.
+4. Summarise for the reader, briefly: the running issue-pilot version and where
+   it runs from, what is done, what is pending, whether the driver is still
+   running, the model and effort level the run's sessions are using (when the
+   state has them), what the next step is (`/issue-pilot:pr` when everything is
+   done, `issues_run.sh --resume --detach` when something is blocked), and
+   whether the usage windows allow it now.
 
 Do not implement anything, do not modify the run state, and do not wait for a
 running driver to finish — report where it is and stop.

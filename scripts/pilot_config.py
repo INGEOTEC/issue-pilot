@@ -85,6 +85,30 @@ def notes_file(issues, cfg=None) -> pathlib.Path:
     return state_dir() / ("issues-notes-%s.txt" % branch_name(issues, cfg))
 
 
+def running_copy():
+    """The root and version of the copy of issue-pilot that is executing.
+
+    Derived from `__file__`, not `CLAUDE_PLUGIN_ROOT`: the driver's
+    subprocesses need not inherit that variable, and `__file__` is correct in
+    every layout -- plugin cache, development checkout, and an `install.sh`
+    lib alike.
+
+    Never raises. A missing, unreadable or malformed manifest, or one with no
+    `"version"` key, just means the version is unknown: `status` is what
+    people run when something is already wrong, and may not fail because a
+    manifest is absent.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    version = None
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+        if isinstance(data, dict):
+            version = data.get("version")
+    except (OSError, json.JSONDecodeError):
+        pass
+    return str(root), version
+
+
 def repo_root(start=None) -> str:
     out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                          capture_output=True, text=True, cwd=start)
@@ -255,6 +279,7 @@ def main():
 
     sub.add_parser("base-branch", help="resolve the base branch, asking GitHub if needed")
     sub.add_parser("path", help="print where run state is kept")
+    sub.add_parser("version", help="print the running version and the path it runs from")
 
     sub.add_parser("default-branch", help="print the repository's default branch on GitHub")
     sub.add_parser("check", help="fail unless this repository is configured")
@@ -285,6 +310,10 @@ def main():
         print(resolve_base_branch())
     elif args.cmd == "path":
         print(state_dir())
+    elif args.cmd == "version":
+        root, version = running_copy()
+        print(version or "unknown")
+        print(root)
     elif args.cmd == "default-branch":
         print(default_branch())
     elif args.cmd == "check":
