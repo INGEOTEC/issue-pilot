@@ -6,6 +6,19 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-17
+
+### Added
+
+- `/issue-pilot:status` now prints, as its first line, the version of
+  issue-pilot producing the report and the path it is running from. A missing
+  model line used to have two indistinguishable causes -- a run started before
+  that field existed, or a reader running an older copy of the tool -- and this
+  removes the second one: the version line always names which copy is talking.
+  `scripts/pilot_config.py` gained a `version` subcommand for it, and
+  `install.sh` now ships `.claude-plugin/plugin.json` into the lib it installs,
+  so the plain-files install reports its version too instead of "unknown".
+
 ## [0.2.0] - 2026-09-14
 
 ### Added
@@ -90,6 +103,7 @@ First public release.
 - Tests covering the dependency rule, the run state, configuration precedence
   and the guard's decisions, using only the standard library.
 
-[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.1
 [0.2.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.1.0

@@ -46,8 +46,10 @@ for tool in git gh claude python3 curl; do
 done
 
 mkdir -p "$LIB" "$COMMANDS"
-rm -rf "$LIB/scripts" "$LIB/hooks"
+rm -rf "$LIB/scripts" "$LIB/hooks" "$LIB/.claude-plugin"
 cp -r "$SRC/scripts" "$SRC/hooks" "$LIB/"
+mkdir -p "$LIB/.claude-plugin"
+cp "$SRC/.claude-plugin/plugin.json" "$LIB/.claude-plugin/plugin.json"
 find "$LIB" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 chmod +x "$LIB"/scripts/*.py "$LIB"/scripts/*.sh "$LIB"/hooks/*.sh
 

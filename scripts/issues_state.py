@@ -230,6 +230,9 @@ def cmd_status(args):
     """The state file, read out loud.  `show` is for scripts; this is for people."""
     state = load()
     attempts = state.get("attempts", {})
+    root, version = pilot_config.running_copy()
+    print(f"issue-pilot: {version or 'unknown'}")
+    print(f"             {root}")
     print(f"repository : {state['repo_root']}")
     off = state.get("base_branch") or "?"
     if state.get("base_commit"):
