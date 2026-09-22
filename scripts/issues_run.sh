@@ -40,6 +40,8 @@
 #   issues_run.sh --pr 165 166          # also open the pull request at the end
 #   issues_run.sh --plan-only 165 166   # show which issues would share a conversation
 #   issues_run.sh --resume              # continue, retrying a blocked issue once
+#   issues_run.sh --fix                 # apply a pending review fix (issues_state.py fix-add)
+#                                        # to a finished run; --detach works, no notes needed
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +56,7 @@ cfg() { python3 "$CONFIG" get "$1" 2>/dev/null || true; }
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 ORIG_ARGS=("$@")
 
-NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; FROM_HEAD=0; OPEN_PR=0; DETACH=0; PLAN_ONLY=0
+NOTES=""; NOTES_FILE=""; REPO=""; RESUME=0; INTERVIEW=1; FROM_HEAD=0; OPEN_PR=0; DETACH=0; PLAN_ONLY=0; FIX=0
 MAX_ATTEMPTS="$(cfg max_attempts)"; MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
 # Every `claude` this driver launches runs on the same model and effort level,
@@ -73,6 +75,7 @@ while [[ $# -gt 0 ]]; do
     --detach) DETACH=1;    shift;;      # run in the background, return at once
     --repo)   REPO="$2";   shift 2;;
     --resume) RESUME=1;    shift;;      # continue a run, retrying if blocked
+    --fix)    FIX=1; INTERVIEW=0; shift;;  # apply a pending review fix to a finished run
     --no-interview) INTERVIEW=0; shift;;
     --from-head) FROM_HEAD=1; shift;;   # cut the run branch from HEAD, not origin
     --sync)   shift;;                    # accepted for old habits: it is now the default
@@ -84,6 +87,15 @@ while [[ $# -gt 0 ]]; do
     *) ARGS+=("$1"); shift;;
   esac
 done
+
+# --fix continues the run recorded in the state on its own; it does not take
+# issue numbers, does not combine with --resume (it already does not unblock
+# or re-initialise) and does not combine with --plan-only (there is no new
+# plan to preview).
+if [[ $FIX -eq 1 && ( ${#ARGS[@]} -gt 0 || $RESUME -eq 1 || $PLAN_ONLY -eq 1 ) ]]; then
+  echo "error: --fix does not take issue numbers and does not combine with --resume or --plan-only." >&2
+  exit 2
+fi
 
 # --------------------------------------------------------------- prerequisites
 for tool in git gh claude python3; do
@@ -191,7 +203,7 @@ MSG
 # ----------------------------------------------------- which branch this run is
 # Resolved before anything is touched, because --detach needs to say where the
 # log will be without having done any work yet.
-if [[ $RESUME -eq 1 ]]; then
+if [[ $RESUME -eq 1 || $FIX -eq 1 ]]; then
   BRANCH="$(python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin)["branch"])')"
   BASE="$(python3 "$STATE" show | python3 -c 'import json,sys; print(json.load(sys.stdin).get("base_branch") or "")')"
 else
@@ -219,6 +231,39 @@ for i in plan:
   exit 0
 fi
 
+# --------------------------------------------------------------- already finished
+# A state file for this branch where every item is already done means this
+# exact run has already been carried out; starting it over would re-run every
+# issue's session against work that is already there. A review finding goes
+# in with fix-add, not with re-running the same issue list.
+if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
+  EXISTING_STATE="$(python3 "$STATE" path)"
+  if [[ -f "$EXISTING_STATE" ]]; then
+    FINISHED="$(python3 -c '
+import json, sys
+s = json.load(open(sys.argv[1]))
+finished = (s.get("branch") == sys.argv[2] and s.get("status")
+           and all(v == "done" for v in s["status"].values()))
+print("yes" if finished else "no")
+' "$EXISTING_STATE" "$BRANCH")"
+    if [[ "$FINISHED" == "yes" ]]; then
+      cat >&2 <<MSG
+error: the run on branch $BRANCH is already finished; every item in it is done.
+
+  A review finding is added with:
+    issues_state.py fix-add --description-file <path> [--issues N ...]
+  and applied with:
+    issues_run.sh --fix
+
+  To start these issues over from scratch instead, on purpose:
+    git branch -D $BRANCH
+    rm $EXISTING_STATE
+MSG
+      exit 2
+    fi
+  fi
+fi
+
 LOGDIR="$PILOT_HOME/logs/$BRANCH"
 mkdir -p "$LOGDIR"
 
@@ -237,8 +282,10 @@ MSG
     exit 2
   fi
   # Cheap checks belong to the parent: a mistake this obvious should be visible
-  # straight away, not buried in a log the caller has not read yet.
-  [[ $RESUME -eq 1 ]] || require_clean_tree
+  # straight away, not buried in a log the caller has not read yet. --fix
+  # requires a clean tree even though --resume does not: the branch it applies
+  # to is not being reopened after a stop mid-issue, so nothing should be there.
+  [[ $RESUME -eq 1 && $FIX -eq 0 ]] || require_clean_tree
   if [[ -n "$NOTES_FILE" && ! -s "$NOTES_FILE" ]]; then
     echo "error: --notes-file $NOTES_FILE is missing or empty." >&2
     exit 2
@@ -268,7 +315,7 @@ MSG
   exit 0
 fi
 
-# --------------------------------------------------------------- resume
+# --------------------------------------------------------------- resume / fix
 if [[ $RESUME -eq 1 ]]; then
   # A blocked issue would otherwise make `next` report the run finished, so
   # --resume silently did nothing at all.  Reopen it and hand it out again:
@@ -278,10 +325,15 @@ if [[ $RESUME -eq 1 ]]; then
   # Resuming from somewhere else must not implement the rest of the run on the
   # wrong branch.
   [[ "$(git rev-parse --abbrev-ref HEAD)" == "$BRANCH" ]] || git checkout "$BRANCH"
+elif [[ $FIX -eq 1 ]]; then
+  # Unlike --resume, --fix does not unblock anything: fix-add already refuses
+  # to add a fix while the run is blocked.
+  require_clean_tree
+  [[ "$(git rev-parse --abbrev-ref HEAD)" == "$BRANCH" ]] || git checkout "$BRANCH"
 fi
 
 # --------------------------------------------------------------- phase 0: branch
-if [[ $RESUME -eq 0 ]]; then
+if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
   require_clean_tree
 
   BASE="$(python3 "$CONFIG" base-branch)"
@@ -309,7 +361,7 @@ if [[ $RESUME -eq 0 ]]; then
 fi
 
 # --------------------------------------------------------------- phase 1
-if [[ $RESUME -eq 0 ]]; then
+if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
   if [[ $INTERVIEW -eq 1 ]]; then
     [[ -t 0 ]] || { echo "error: phase 1 needs a terminal to ask its questions; run this from your own shell, or pass --notes/--no-interview." >&2; exit 2; }
 
@@ -417,6 +469,11 @@ check_usage() {
   exit 1
 }
 
+# A human label for a plan item id: "issue #3" for an issue, "review fix-1"
+# for a review fix -- used only in messages; state and log names use the id
+# ($issue) as-is.
+label() { case "$1" in fix-*) echo "review $1";; *) echo "issue #$1";; esac; }
+
 # --------------------------------------------------------------- autonomous run
 while next_json=$(python3 "$STATE" next); do
   check_usage
@@ -427,7 +484,7 @@ while next_json=$(python3 "$STATE" next); do
   stale=0
   while :; do
     log="$LOGDIR/issue-$issue-attempt-$attempt.log"
-    echo "=== issue #$issue, attempt $attempt/$MAX_ATTEMPTS (fresh conversation: $clear) -> $log ==="
+    echo "=== $(label "$issue"), attempt $attempt/$MAX_ATTEMPTS (fresh conversation: $clear) -> $log ==="
     python3 "$STATE" attempt "$issue" >/dev/null
     before="$(fingerprint)"
 
@@ -439,12 +496,12 @@ while next_json=$(python3 "$STATE" next); do
       # code is usually written, green and uncommitted.  Resuming the same
       # conversation picks it up with all of that context intact.
       prompt=$(cat <<EOF
-The previous session on issue #$issue ended WITHOUT marking it done and without
+The previous session on $(label "$issue") ended WITHOUT marking it done and without
 declaring it blocked, so it died mid-task. The usual cause is ending the turn to
 wait for a background process: under \`claude -p\` that ends the session and
 kills that process.
 
-Pick issue #$issue up where it was left. Before anything else find out what is
+Pick $(label "$issue") up where it was left. Before anything else find out what is
 already done (\`git status\`, \`git log --oneline\`, the artifacts the issue
 produces) instead of redoing it. If a long process died half-way, start it again
 and WAIT for it without ending your turn (foreground Bash with a timeout, or
@@ -487,7 +544,7 @@ EOF
     # crash, and retrying it just burns the window.  Stop and say so.
     if [[ "$status" == "blocked" ]]; then
       reason=$(python3 "$STATE" show | python3 -c 'import json,sys; b=json.load(sys.stdin).get("blocked") or {}; print(b.get("reason",""))')
-      echo "issue #$issue was blocked by the session: $reason" >&2
+      echo "$(label "$issue") was blocked by the session: $reason" >&2
       echo "logs in $LOGDIR" >&2
       exit 1
     fi
@@ -508,7 +565,7 @@ EOF
     if [[ $stale -ge 2 ]]; then
       python3 "$STATE" block "$issue" \
         --reason "two consecutive sessions ended without changing anything (exit $rc); see $LOGDIR"
-      echo "issue #$issue made no progress in two attempts; stopping. Logs in $LOGDIR" >&2
+      echo "$(label "$issue") made no progress in two attempts; stopping. Logs in $LOGDIR" >&2
       exit 1
     fi
 
@@ -516,11 +573,11 @@ EOF
     if [[ $attempt -gt $MAX_ATTEMPTS ]]; then
       python3 "$STATE" block "$issue" \
         --reason "$MAX_ATTEMPTS sessions ended without marking the issue done; see $LOGDIR"
-      echo "issue #$issue did not finish in $MAX_ATTEMPTS attempts; stopping. Logs in $LOGDIR" >&2
+      echo "$(label "$issue") did not finish in $MAX_ATTEMPTS attempts; stopping. Logs in $LOGDIR" >&2
       exit 1
     fi
   done
-  echo "=== issue #$issue done ==="
+  echo "=== $(label "$issue") done ==="
 done
 
 if [[ $OPEN_PR -eq 1 ]]; then

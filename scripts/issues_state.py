@@ -11,15 +11,21 @@ Subcommands
   init <issues...> [--branch B] [--base-branch B] [--base-commit SHA] [--repo R] [--notes TEXT]
         Builds the plan (issues_plan.py) and stores it, together with the
         commit of the base branch the run branch was cut from.
-  next  Prints the next pending issue and whether the conversation must be
-        cleared before starting it.  Exits 3 when the run is finished.
+  fix-add --description-file PATH [--issues N [N ...]]
+        Appends a review fix (`fix-<k>`) to the plan, as a pending item of its
+        own.  Refused once a pull request is recorded, while an issue is not
+        done, while the run is blocked, when a named issue is not in the run,
+        or when the description is empty.
+  next  Prints the next pending item (an issue number or `fix-<k>`) and
+        whether the conversation must be cleared before starting it.  Exits 3
+        when the run is finished.
   engine --model M --effort E   Records the model and effort level the run's
         sessions are being launched on.
-  attempt <n>                 Records another attempt on an issue.
+  attempt <id>                 Records another attempt on an issue or fix.
   session <uuid>              Records the conversation the run is currently in.
-  done <n> [--commit SHA]     Marks an issue implemented.
-  block <n> [--reason TEXT]   Marks an issue blocked; the run stops there.
-  unblock [n]  Clears the blocked flag and puts the blocked issue back to
+  done <id> [--commit SHA]     Marks an issue or fix implemented.
+  block <id> [--reason TEXT]   Marks an issue or fix blocked; the run stops there.
+  unblock [id]  Clears the blocked flag and puts the blocked item back to
         pending, so `next` hands it out again.  With no argument it reopens
         whatever is currently blocked.
   pr <url> --number N --base B [--closes-automatically]
@@ -27,12 +33,17 @@ Subcommands
   show  Dumps the whole state as JSON.
   status  The same thing for a human: what is done, what is next, what stopped.
   path  Prints the state file for this repository.
+
+Where `<id>` appears, it is either an issue number or a review fix id
+(`fix-1`, `fix-2`, ...); `status`, `attempts` and `commits` are keyed by the
+same string either way.
 """
 import argparse
 import datetime
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -41,6 +52,29 @@ sys.path.insert(0, str(HERE))
 import pilot_config  # noqa: E402
 
 MARKS = {"done": "+", "pending": ".", "blocked": "!"}
+FIX_ID = re.compile(r"^fix-(\d+)$")
+
+
+def parse_key(text):
+    """An issue number as `int`, or a `fix-<k>` id kept as `str`."""
+    text = str(text)
+    if FIX_ID.match(text):
+        return text
+    return int(text)
+
+
+def item_key(text):
+    """argparse `type=` for a positional that accepts either form."""
+    try:
+        return parse_key(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not an issue number or a fix id (fix-<k>)")
+
+
+def sort_key(item):
+    """Issues before fixes, each in their own numeric order."""
+    return (0, item) if isinstance(item, int) else (1, item)
 
 
 def now():
@@ -123,6 +157,60 @@ def cmd_init(args):
     print(json.dumps(state, indent=2, ensure_ascii=False))
 
 
+def fix_add_refused(message):
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def cmd_fix_add(args):
+    state = load()
+    if state.get("pull_request"):
+        fix_add_refused("fix-add is refused once a pull request is recorded; "
+                        "its body would no longer describe the branch.")
+
+    issue_numbers = {item["issue"] for item in state["plan"]
+                     if isinstance(item["issue"], int)}
+    not_done = sorted(n for n in issue_numbers if state["status"][str(n)] != "done")
+    if not_done:
+        fix_add_refused("fix-add is refused while an issue is not done yet: " +
+                        ", ".join(f"#{n}" for n in not_done))
+
+    if state.get("blocked"):
+        fix_add_refused("fix-add is refused while the run is blocked; "
+                        "resolve or unblock it first.")
+
+    issues = sorted(set(args.issues or []))
+    unknown = [n for n in issues if n not in issue_numbers]
+    if unknown:
+        fix_add_refused("not part of this run: " +
+                        ", ".join(f"#{n}" for n in unknown))
+
+    description = args.description_file.read_text().strip()
+    if not description:
+        fix_add_refused(f"{args.description_file} is empty.")
+
+    existing = [int(FIX_ID.match(item["issue"]).group(1)) for item in state["plan"]
+               if isinstance(item["issue"], str) and FIX_ID.match(item["issue"])]
+    fid = f"fix-{max(existing, default=0) + 1}"
+
+    item = {
+        "issue": fid,
+        "title": description.splitlines()[0][:70],
+        "depends_on": issues,
+        "clear_before": not issues,
+        "fix": {
+            "description": description,
+            "issues": issues,
+            "added_at": now(),
+        },
+    }
+    state["plan"].append(item)
+    state["status"][fid] = "pending"
+    state["attempts"][fid] = 0
+    save(state)
+    print(fid)
+
+
 def cmd_next(args):
     state = load()
     if state.get("blocked"):
@@ -130,7 +218,7 @@ def cmd_next(args):
         sys.exit(3)
     for item in state["plan"]:
         if state["status"][str(item["issue"])] == "pending":
-            print(json.dumps({
+            payload = {
                 "issue": item["issue"],
                 "title": item["title"],
                 "depends_on": item["depends_on"],
@@ -140,7 +228,10 @@ def cmd_next(args):
                 "attempts": state.get("attempts", {}).get(str(item["issue"]), 0),
                 "remaining": [i["issue"] for i in state["plan"]
                               if state["status"][str(i["issue"])] == "pending"],
-            }, indent=2, ensure_ascii=False))
+            }
+            if item.get("fix"):
+                payload["fix"] = item["fix"]
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
             return
     print(json.dumps({"finished": True, "blocked": None}, indent=2))
     sys.exit(3)
@@ -198,8 +289,8 @@ def cmd_unblock(args):
         issues = [state["blocked"]["issue"]]
     # A run can only ever be blocked on one issue, but reopen anything marked
     # blocked so a hand-edited state file cannot leave a stale entry behind.
-    issues += [int(n) for n, st in state["status"].items()
-               if st == "blocked" and int(n) not in issues]
+    issues += [parse_key(n) for n, st in state["status"].items()
+               if st == "blocked" and parse_key(n) not in issues]
     if not issues:
         print("nothing was blocked")
         return
@@ -207,7 +298,7 @@ def cmd_unblock(args):
         state["status"][str(n)] = "pending"
     state["blocked"] = None
     save(state)
-    print("reopened as pending: " + ", ".join(str(n) for n in sorted(issues)))
+    print("reopened as pending: " + ", ".join(str(n) for n in sorted(issues, key=sort_key)))
 
 
 def cmd_pr(args):
@@ -230,6 +321,10 @@ def cmd_status(args):
     """The state file, read out loud.  `show` is for scripts; this is for people."""
     state = load()
     attempts = state.get("attempts", {})
+
+    def label(n):
+        return str(n) if str(n).startswith("fix-") else f"#{n}"
+
     root, version = pilot_config.running_copy()
     print(f"issue-pilot: {version or 'unknown'}")
     print(f"             {root}")
@@ -253,7 +348,7 @@ def cmd_status(args):
         n = str(item["issue"])
         st = state["status"][n]
         deps = ", ".join(f"#{d}" for d in item["depends_on"]) or "-"
-        line = (f" {MARKS.get(st, '?')} #{n:<6} {st:<8} "
+        line = (f" {MARKS.get(st, '?')} {label(item['issue']):<7} {st:<8} "
                 f"fresh={str(item['clear_before']):<5} depends={deps:<12} "
                 f"attempts={attempts.get(n, 0)}")
         if state["commits"].get(n):
@@ -272,14 +367,14 @@ def cmd_status(args):
 
     blocked = state.get("blocked")
     if blocked:
-        print(f"STOPPED on #{blocked['issue']}: {blocked.get('reason') or 'no reason recorded'}")
+        print(f"STOPPED on {label(blocked['issue'])}: {blocked.get('reason') or 'no reason recorded'}")
         print(f"logs: {log_dir(state)}")
         print("retry it with: issues_run.sh --resume")
     elif all(v == "done" for v in state["status"].values()):
         print("every issue is done -- open the pull request with /issue-pilot:pr")
     else:
         pending = [n for n, v in state["status"].items() if v == "pending"]
-        print(f"pending: {', '.join('#' + n for n in pending)}")
+        print(f"pending: {', '.join(label(n) for n in pending)}")
         print(f"logs: {log_dir(state)}")
 
     if state.get("notes"):
@@ -301,6 +396,11 @@ def main():
     p.add_argument("--notes")
     p.set_defaults(func=cmd_init)
 
+    p = sub.add_parser("fix-add")
+    p.add_argument("--description-file", required=True, type=pathlib.Path)
+    p.add_argument("--issues", nargs="+", type=int, default=[])
+    p.set_defaults(func=cmd_fix_add)
+
     sub.add_parser("next").set_defaults(func=cmd_next)
 
     p = sub.add_parser("engine")
@@ -311,17 +411,17 @@ def main():
     p = sub.add_parser("session"); p.add_argument("uuid")
     p.set_defaults(func=cmd_session)
 
-    p = sub.add_parser("attempt"); p.add_argument("issue", type=int)
+    p = sub.add_parser("attempt"); p.add_argument("issue", type=item_key)
     p.set_defaults(func=cmd_attempt)
 
-    p = sub.add_parser("done"); p.add_argument("issue", type=int)
+    p = sub.add_parser("done"); p.add_argument("issue", type=item_key)
     p.add_argument("--commit"); p.set_defaults(func=cmd_done)
 
-    p = sub.add_parser("block"); p.add_argument("issue", type=int)
+    p = sub.add_parser("block"); p.add_argument("issue", type=item_key)
     p.add_argument("--reason"); p.set_defaults(func=cmd_block)
 
     p = sub.add_parser("unblock")
-    p.add_argument("issue", nargs="?", type=int)
+    p.add_argument("issue", nargs="?", type=item_key)
     p.set_defaults(func=cmd_unblock)
 
     p = sub.add_parser("pr")
