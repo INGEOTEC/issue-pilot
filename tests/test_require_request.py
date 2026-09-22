@@ -48,6 +48,32 @@ class RequireRequest(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 self.assertEqual(self.hook({"prompt": prompt}).returncode, 0)
 
+    def test_a_bare_fix_is_refused_and_told_why(self):
+        for prompt in ("/issue-pilot:fix", "/issue-pilot:fix   ",
+                       "  /issue-pilot:fix\n"):
+            with self.subTest(prompt=prompt):
+                out = self.hook({"prompt": prompt})
+                self.assertEqual(out.returncode, 2)          # 2 blocks the prompt
+                self.assertIn("needs to be told what the review found", out.stderr)
+                self.assertIn("/issue-pilot:fix the export flag", out.stderr)
+
+    def test_a_fix_with_a_finding_goes_through(self):
+        for prompt in ("/issue-pilot:fix the export flag is ignored when --quiet is set",
+                       "/issue-pilot:fix\nthe retry counter never resets"):
+            with self.subTest(prompt=prompt):
+                out = self.hook({"prompt": prompt})
+                self.assertEqual(out.returncode, 0)
+                self.assertEqual(out.stderr, "")
+
+    def test_fix_has_no_update_exception(self):
+        # --update rereads an existing issue; a fix has no issue to reread, so
+        # this is just ordinary fix text and must go through, not be refused.
+        out = self.hook({"prompt": "/issue-pilot:fix --update 42"})
+        self.assertEqual(out.returncode, 0)
+
+    def test_fixing_is_not_the_fix_command(self):
+        self.assertEqual(self.hook({"prompt": "/issue-pilot:fixing something"}).returncode, 0)
+
     def test_a_payload_it_cannot_read_never_blocks_anything(self):
         for payload in ("{not json", "", json.dumps({"no": "prompt"}),
                         json.dumps({"prompt": None})):

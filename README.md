@@ -153,6 +153,9 @@ process of its own — so finish or kill it first.
               |    `--->  /issue-pilot:status  ->  where the run is right now,
               |                  from any session, while it runs
               |
+   the review: /issue-pilot:fix <what you found>  ->  correct it on the same
+              branch, as many times as review turns anything up (optional)
+              |
      the close: /issue-pilot:pr  ->  one pull request, Closes #165 #166 #170
               |
               |  (only if the base branch is not the repository's default one)
@@ -293,6 +296,19 @@ again — one retry per invocation, so a persistently failing issue still stops 
 run instead of looping. It does not ask the questions again: the answers
 are already in the state.
 
+**Review fixes.** Between a finished run and `/issue-pilot:pr` there is
+usually a review of the branch. A finding from it is not a GitHub issue — it
+is not necessarily about any one of the run's issues, and pinning it on one
+arbitrarily loses the rest — so `/issue-pilot:fix <what you found>` records it
+as a plan item of its own (`fix-1`, `fix-2`, ...) directly in the run state,
+and `issues_run.sh --fix` applies it on the same branch, retried and blocked
+exactly like an issue. It names the issues it corrects when that is obvious
+from the review, and starts a clean conversation when it does not — the same
+deterministic rule `issues_plan.py` uses for issues. It goes into the same
+pull request, in its own section, with no `Closes` (there is no issue to
+close). A finished run's state refuses to be started over with the same issue
+list precisely so this is the way back in, not a rerun.
+
 **Logs.** The driver's own output goes to
 `~/.claude/issue-pilot/logs/<branch>/driver.log`, and every attempt is kept
 whole, with the exit status of `claude` at the end, in
@@ -371,6 +387,7 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
 | `/issue-pilot:status` | The run in plain words, plus how much usage window is left. |
+| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch. |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
 | `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
 | `/issue-pilot:one <n>` | One issue. Called by the driver; you rarely run it yourself. |
@@ -386,6 +403,7 @@ scripts/issues_run.sh --detach --no-interview 165 # run in the background
 scripts/issues_run.sh --plan-only 165 166 170     # show the plan, touch nothing
 scripts/issues_run.sh --pr 165 166                # open the pull request too
 scripts/issues_run.sh --resume                    # retry the blocked issue
+scripts/issues_run.sh --fix                       # apply a pending review fix (issues_state.py fix-add)
 ```
 
 The driver fast-forwards the local base branch to `origin/<base>` and cuts the
