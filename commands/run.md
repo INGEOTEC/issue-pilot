@@ -204,6 +204,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" unblock
 `--resume` does not repeat the questions: the notes are already in the state, and
 it returns to the run branch before continuing.
 
+## Between the run and the pull request — review
+
+Once every issue is `done`, the branch is there to be reviewed before the
+single pull request opens. A finding from that review is **not** a reason to
+run this command again over the same issue list — a finished run's state
+refuses that outright, since it would silently forget which issues are already
+done. It is `/issue-pilot:fix <what you found>` instead: it records the
+finding on the run state as a plan item of its own and has the driver correct
+it on the same branch, retried and blocked exactly like an issue, with no
+GitHub issue to attach it to. Repeat it as many times as review turns anything
+up; `/issue-pilot:pr` comes after, once there is nothing left to fix.
+
 ## Phase 3 — pull request
 
 Only if **every** issue in the list is implemented and green

@@ -208,5 +208,132 @@ class RunState(PilotTestCase):
         self.assertIn(str(lib), out.stdout)
 
 
+class FixItems(RunState):
+    """Review fixes: a plan item of their own, applied by the same driver.
+
+    Not a GitHub issue -- see #10 -- so they are added and driven entirely
+    through this state, on a run whose issues are all already done.
+    """
+
+    def description_file(self, text="fix the thing\nmore detail\n"):
+        path = pathlib.Path(self.tmp.name) / "fix.txt"
+        path.write_text(text)
+        return path
+
+    def fix_add(self, *, issues=None, description="fix the thing", check=True):
+        args = ["fix-add", "--description-file", str(self.description_file(description))]
+        if issues:
+            args += ["--issues"] + [str(n) for n in issues]
+        return self.run_script("issues_state.py", *args, check=check)
+
+    def finish_all(self):
+        self.init()
+        for n in (1, 2, 3):
+            self.run_script("issues_state.py", "done", str(n))
+
+    def test_fix_add_appends_a_pending_fix_with_its_dependencies(self):
+        self.finish_all()
+        out = self.fix_add(issues=[1, 3])
+        self.assertEqual(out.stdout.strip(), "fix-1")
+        state = self.state()
+        item = state["plan"][-1]
+        self.assertEqual(item["issue"], "fix-1")
+        self.assertEqual(item["depends_on"], [1, 3])
+        self.assertFalse(item["clear_before"])
+        self.assertEqual(state["status"]["fix-1"], "pending")
+        self.assertEqual(state["attempts"]["fix-1"], 0)
+
+    def test_fix_add_with_no_issues_starts_a_fresh_conversation(self):
+        self.finish_all()
+        self.fix_add()
+        item = self.state()["plan"][-1]
+        self.assertEqual(item["depends_on"], [])
+        self.assertTrue(item["clear_before"])
+
+    def test_a_second_fix_is_fix_2_after_fix_1_in_the_plan(self):
+        self.finish_all()
+        self.fix_add()
+        out = self.fix_add()
+        self.assertEqual(out.stdout.strip(), "fix-2")
+        self.assertEqual([p["issue"] for p in self.state()["plan"][-2:]],
+                         ["fix-1", "fix-2"])
+
+    def test_fix_add_is_refused_once_a_pull_request_is_recorded(self):
+        self.finish_all()
+        self.run_script("issues_state.py", "pr", "https://gh/pr/1",
+                        "--number", "1", "--base", "main", "--closes-automatically")
+        out = self.fix_add(check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("pull request", out.stderr)
+
+    def test_fix_add_is_refused_while_an_issue_is_still_pending(self):
+        self.init()
+        self.run_script("issues_state.py", "done", "1")
+        out = self.fix_add(check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("#2", out.stderr)
+        self.assertIn("#3", out.stderr)
+
+    def test_fix_add_is_refused_while_the_run_is_blocked(self):
+        self.finish_all()
+        self.fix_add()
+        self.run_script("issues_state.py", "block", "fix-1", "--reason", "needs more thought")
+        out = self.fix_add(check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("blocked", out.stderr)
+
+    def test_fix_add_is_refused_when_a_named_issue_is_not_in_the_run(self):
+        self.finish_all()
+        out = self.fix_add(issues=[99], check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("#99", out.stderr)
+
+    def test_fix_add_is_refused_when_the_description_is_empty(self):
+        self.finish_all()
+        out = self.fix_add(description="   \n", check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("empty", out.stderr)
+
+    def test_next_hands_out_a_pending_fix_with_its_spec(self):
+        self.finish_all()
+        self.fix_add(issues=[1])
+        _, payload = self.next_issue()
+        self.assertEqual(payload["issue"], "fix-1")
+        self.assertEqual(payload["fix"]["issues"], [1])
+        self.assertIn("fix the thing", payload["fix"]["description"])
+
+    def test_next_exits_3_once_the_fix_is_done(self):
+        self.finish_all()
+        self.fix_add()
+        self.run_script("issues_state.py", "done", "fix-1")
+        out, payload = self.next_issue()
+        self.assertEqual(out.returncode, 3)
+        self.assertTrue(payload["finished"])
+
+    def test_done_block_unblock_attempt_all_work_on_a_fix_id(self):
+        self.finish_all()
+        self.fix_add()
+        self.run_script("issues_state.py", "attempt", "fix-1")
+        self.assertEqual(self.state()["attempts"]["fix-1"], 1)
+
+        self.run_script("issues_state.py", "block", "fix-1", "--reason", "x")
+        self.assertEqual(self.state()["blocked"]["issue"], "fix-1")
+
+        self.run_script("issues_state.py", "unblock")
+        self.assertEqual(self.state()["status"]["fix-1"], "pending")
+        self.assertIsNone(self.state()["blocked"])
+
+        self.run_script("issues_state.py", "done", "fix-1", "--commit", "cafefeed")
+        self.assertEqual(self.state()["status"]["fix-1"], "done")
+        self.assertEqual(self.state()["commits"]["fix-1"], "cafefeed")
+
+    def test_status_lists_a_fix_in_the_table_with_its_title(self):
+        self.finish_all()
+        self.fix_add(issues=[1], description="do the thing better\nmore detail\n")
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn("fix-1", out)
+        self.assertIn("do the thing better", out)
+
+
 if __name__ == "__main__":
     unittest.main()

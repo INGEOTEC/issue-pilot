@@ -7,6 +7,7 @@ refuses to start.
 """
 import json
 import os
+import pathlib
 import time
 import unittest
 
@@ -329,6 +330,129 @@ class Run(PilotTestCase):
             or "{}").get("status", {})
         self.assertEqual(status, {"1": "done", "2": "done"})
         self.assertIn("/issue-pilot:pr", (logdir / "driver.log").read_text())
+
+
+class FixRuns(Run):
+    """--fix: applying a review finding to a run whose issues are all done."""
+
+    def description_file(self, text="fix the thing\n"):
+        path = self.repo.parent / "fix.txt"
+        path.write_text(text)
+        return path
+
+    def fix_add(self, *, issues=None, check=True):
+        args = ["fix-add", "--description-file", str(self.description_file())]
+        if issues:
+            args += ["--issues"] + [str(n) for n in issues]
+        return self.run_script("issues_state.py", *args, check=check)
+
+    def reset_claude_log(self):
+        """So a `--fix` invocation's own calls and plan start counting from zero,
+        instead of continuing where the run that finished the issues left off."""
+        self.claude_log.unlink(missing_ok=True)
+        self.claude_log.with_name(self.claude_log.name + ".branch").unlink(missing_ok=True)
+        pathlib.Path(self.env["FAKE_CLAUDE_COUNTER"]).unlink(missing_ok=True)
+
+    def test_a_fix_naming_an_issue_resumes_the_runs_session(self):
+        self.run_driver("--no-interview", "1", check=True)
+        session = self.session_of(self.claude_calls()[0])[1]
+        self.fix_add(issues=[1])
+        self.reset_claude_log()
+
+        out = self.run_driver("--fix", check=True)
+        calls = self.claude_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn("/issue-pilot:one fix-1", calls[0][1])
+        self.assertEqual(self.session_of(calls[0]), ("--resume", session))
+        self.assertEqual(self.state()["status"]["fix-1"], "done")
+        self.assertIn("back on main", out.stdout)
+
+    def test_a_fix_naming_no_issue_starts_a_fresh_conversation(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.fix_add()
+        self.reset_claude_log()
+
+        self.run_driver("--fix", check=True)
+        calls = self.claude_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.session_of(calls[0])[0], "--session-id")
+
+    def test_a_fix_runs_on_the_run_branch(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.fix_add(issues=[1])
+        self.reset_claude_log()
+
+        self.run_driver("--fix", check=True)
+        self.assertEqual(self.claude_branches(), ["issues-1"])
+
+    def test_a_fix_that_dies_mid_task_is_retried_like_an_issue(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.fix_add()
+        self.reset_claude_log()
+
+        out = self.run_driver("--fix", env=self.plan("touch", "done"), check=True)
+        self.assertEqual(self.state()["status"]["fix-1"], "done")
+        self.assertEqual(self.state()["attempts"]["fix-1"], 2)
+        self.assertIn("attempt 2", out.stdout)
+
+    def test_a_fix_that_blocks_stops_the_driver_without_retrying(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.fix_add()
+        self.reset_claude_log()
+
+        out = self.run_driver("--fix", env=self.plan("block"))
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(self.state()["blocked"]["issue"], "fix-1")
+
+    def test_a_detached_fix_returns_at_once_and_keeps_going(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.fix_add()
+        self.reset_claude_log()
+
+        started = time.time()
+        out = self.run_driver("--fix", "--detach", check=True)
+        self.assertLess(time.time() - started, 20)
+        self.assertIn("background", out.stdout)
+
+        logdir = self.home / "logs" / "issues-1"
+        pid = int((logdir / "driver.pid").read_text().strip())
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+            time.sleep(0.5)
+        else:
+            self.fail("the detached fix run never finished:\n" +
+                      (logdir / "driver.log").read_text())
+        self.assertEqual(self.state()["status"]["fix-1"], "done")
+
+    def test_a_rerun_over_a_finished_run_is_refused(self):
+        self.run_driver("--no-interview", "1", check=True)
+        before = self.state()
+
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("fix-add", out.stderr)
+        self.assertIn("--fix", out.stderr)
+        self.assertIn("git branch -D", out.stderr)
+        self.assertEqual(self.state(), before)
+
+    def test_fix_with_issue_numbers_is_refused(self):
+        self.run_driver("--no-interview", "1", check=True)
+        out = self.run_driver("--fix", "1")
+        self.assertEqual(out.returncode, 2)
+
+    def test_fix_with_resume_is_refused(self):
+        self.run_driver("--no-interview", "1", check=True)
+        out = self.run_driver("--fix", "--resume")
+        self.assertEqual(out.returncode, 2)
+
+    def test_fix_with_plan_only_is_refused(self):
+        self.run_driver("--no-interview", "1", check=True)
+        out = self.run_driver("--fix", "--plan-only")
+        self.assertEqual(out.returncode, 2)
 
 
 if __name__ == "__main__":

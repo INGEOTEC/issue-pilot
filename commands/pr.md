@@ -38,8 +38,13 @@ Close the issue-pilot run by opening **one single** pull request.
    gh pr create --base <base_branch> --title '<summary of the run>' --body-file <file>
    ```
 
-   The body: a section per issue, in the order they were implemented; the list of
-   commits; `Closes #<n>` for every issue in the run; and, at the end:
+   The body: a section per issue, in the order they were implemented; then,
+   only when the plan has any `fix-<k>` items, a **Review fixes** section —
+   one entry per fix with its first line (the title), the issues it named (or
+   "no issue named" when it named none) and its commit; the list of commits
+   (issues and fixes alike); `Closes #<n>` for every issue in the run, and
+   **none** for a fix — it corrected something already in the run, not a
+   separate piece of work with its own issue to close; and, at the end:
 
    🤖 Generated with [Claude Code](https://claude.com/claude-code)
 

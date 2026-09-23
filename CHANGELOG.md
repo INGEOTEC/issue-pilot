@@ -6,6 +6,35 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Added
+
+- **Review fixes.** Between a finished run and `/issue-pilot:pr` there is
+  usually a review of the branch; a finding from it is now `/issue-pilot:fix
+  <what you found>` instead of a rerun over the same issue list. It records
+  the finding as a plan item of its own (`fix-1`, `fix-2`, ...) directly in
+  the run state — `scripts/issues_state.py` gained `fix-add`, and `done`,
+  `block`, `attempt` and `unblock` now accept a fix id as well as an issue
+  number — and `scripts/issues_run.sh --fix` applies it on the run branch,
+  retried and blocked exactly like an issue, with no GitHub issue required. It
+  goes into the pull request in its own **Review fixes** section, with no
+  `Closes` for it.
+- `hooks/require_request.py` now also refuses a bare `/issue-pilot:fix`, in
+  the same shape as the existing `/issue-pilot:plan` refusal.
+
+### Changed
+
+- `issues_run.sh` refuses to start a run over the same issue list when its
+  state already has every item `done`, instead of silently forgetting which
+  issues were already implemented: that path is now `/issue-pilot:fix` for a
+  review finding, or deleting the branch and state file on purpose to start
+  over.
+- `commands/one.md` now handles a `fix-<k>` item: its spec is the fix's
+  description rather than a GitHub issue, its commit message names the issues
+  it corrects (`<summary> (review fix-<k>: #4 #3)`, or `(review fix-<k>)` for
+  none), and it comments only on the issues it names.
+
 ## [0.2.1] - 2026-09-17
 
 ### Added
@@ -103,7 +132,8 @@ First public release.
 - Tests covering the dependency rule, the run state, configuration precedence
   and the guard's decisions, using only the standard library.
 
-[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.3.0
 [0.2.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.1
 [0.2.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.1.0

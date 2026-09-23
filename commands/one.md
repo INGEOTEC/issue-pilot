@@ -1,6 +1,6 @@
 ---
 description: Implement ONE issue of an issue-pilot run, in a possibly clean conversation
-argument-hint: <issue number>
+argument-hint: <issue number | fix-k>
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
@@ -102,6 +102,31 @@ So:
    only for a real blocker. Ending your turn without marking anything is not a
    way to give up: the driver treats that as an accidental death and launches
    you again on the same issue.
+
+## When the item is a review fix (`fix-<k>`)
+
+A review fix is not a GitHub issue: it is a finding recorded on the run state by
+`/issue-pilot:fix`, after the run's issues were already implemented. When
+`issues_state.py next` reports an id of this shape, apply these differences to
+the steps above; everything else — the autonomy rules, checking what is already
+done before redoing it, tests green before any commit — applies unchanged:
+
+- **Step 4 (the spec).** There is no issue to read. The full spec — what is
+  wrong, where, the fix, how to check it, what is out of scope — is the `fix`
+  object's `description`, already printed by `next`. If `depends_on` names
+  issues, read them (`gh issue view <n> --comments`) for context on the work the
+  fix corrects.
+- **Step 6 (finishing).** The commit message is `<summary> (review fix-<k>: #4
+  #3)`, naming the issues in `depends_on`, or `(review fix-<k>)` when it names
+  none — say, in the commit or a one-line comment near the change, that this
+  corrects a review finding found after the fact, so a later editor does not
+  mistake it for part of the original issue and remove it. Comment on **each**
+  issue named with what was corrected, the commit and the test result; when it
+  names none, there is nothing on GitHub to comment on. Mark it with
+  `issues_state.py done fix-<k> --commit "$(git rev-parse HEAD)"`.
+- **Step 7 (blocking).** `issues_state.py block fix-<k> --reason '...'`, same as
+  for an issue — no GitHub comment, since a fix that names no issue has nowhere
+  to put one.
 
 Do not open a pull request here, and do not start any other issue: the driver
 (`issues_run.sh`) decides what comes next and whether the conversation is

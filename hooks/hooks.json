@@ -1,5 +1,5 @@
 {
-  "description": "Measures your Claude usage windows every few minutes and pauses the session before a long autonomous run exhausts them; refuses /issue-pilot:plan when it is given nothing to plan.",
+  "description": "Measures your Claude usage windows every few minutes and pauses the session before a long autonomous run exhausts them; refuses /issue-pilot:plan or /issue-pilot:fix when given nothing to plan or fix.",
   "hooks": {
     "PreToolUse": [
       {
