@@ -53,6 +53,9 @@ Restart Claude Code, then configure the repository you want to use it on:
 /issue-pilot:init
 ```
 
+That lands `.issue-pilot.json` on the repository's base branch through a pull
+request, and offers to merge it right away.
+
 Prefer plain files under `~/.claude`, or on an older Claude Code without
 `/plugin`? Clone the repository and run the installer instead — it puts the
 commands in `~/.claude/commands/issue-pilot/`, so they are invoked by exactly
@@ -173,7 +176,11 @@ That is not optional — nothing else runs without `.issue-pilot.json`. It
 inspects the project, proposes a configuration, and asks you to confirm it. The
 proposal is often nearly right and occasionally wrong in a way only a person
 notices: a repository whose tests live in `tests/test_*.py` but are written with
-`unittest` gets offered `pytest -q`.
+`unittest` gets offered `pytest -q`. Everything else starts from the base branch
+as it is on origin, so init does not commit the file locally: it opens a pull
+request against the base branch with the configuration and offers to merge it
+right away. If you decline, or GitHub wants a review first, `/issue-pilot:plan`
+and `/issue-pilot:run` refuse until it is merged and the base pulled.
 
 Then write the issue:
 
@@ -360,7 +367,8 @@ See it yourself at any time:
 deliberate: an unattended run has nobody to ask what "green" means and no way to
 tell you it guessed wrong. `test_command` is the one setting with no sensible
 fallback, so it is the one the check insists on; a project with no tests can set
-it to a command that exits 0.
+it to a command that exits 0. The file has to be on the base branch on origin,
+which is what init arranges.
 
 Every setting can be overridden for a single run by an environment variable
 (`ISSUE_PILOT_TEST_COMMAND`, `ISSUE_PILOT_MODEL`, ...). See
@@ -383,7 +391,7 @@ Every setting can be overridden for a single run by an environment variable
 
 | Command | What it does |
 |---|---|
-| `/issue-pilot:init` | Configures issue-pilot for this repository. Run it once, before anything else. |
+| `/issue-pilot:init` | Configures issue-pilot for this repository and opens the pull request that lands it. Run it once, before anything else. |
 | `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
 | `/issue-pilot:status` | The run in plain words, plus how much usage window is left. |

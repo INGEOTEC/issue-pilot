@@ -6,6 +6,31 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-01
+
+### Added
+
+- `scripts/config_land.sh` lands `.issue-pilot.json` on the base branch through
+  a pull request: a branch `configure-issue-pilot` from the base at origin's
+  tip, with the file as its one commit, pushed and opened against the base
+  (`--draft` when `pr_draft` is set). It refuses, naming the way out, when the
+  tree has anything else in it, when it is not on the base or the base is not
+  at origin's tip, or when a `configure-issue-pilot` branch is left over.
+- `config_land.sh --merge` squash-merges that pull request right away, deletes
+  the branch and fast-forwards the local base. When GitHub refuses the merge it
+  still exits 0, with the pull request open to be merged by hand.
+- `/issue-pilot:init` runs `base_sync.sh` before anything is asked or written,
+  asks whether to merge the pull request right away, and its report says
+  whether `/issue-pilot:plan` can run now or has to wait for the merge.
+
+### Fixed
+
+- `/issue-pilot:init` committed the configuration on the local base branch,
+  which `base_sync.sh` then refused ("local main is 1 commit(s) ahead of
+  origin/main"), and on a base branch that requires pull requests a direct push
+  would not have worked either. The configuration now reaches origin through a
+  pull request.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added
@@ -132,7 +157,8 @@ First public release.
 - Tests covering the dependency rule, the run state, configuration precedence
   and the guard's decisions, using only the standard library.
 
-[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.3.1
 [0.3.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.3.0
 [0.2.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.1
 [0.2.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.0
