@@ -65,6 +65,7 @@ class PilotTestCase(unittest.TestCase):
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "FAKE_GH_ISSUES": str(self.issues_file),
             "FAKE_GH_DEFAULT_BRANCH": "main",
+            "FAKE_GH_PR_LOG": str(root / "gh-pr.jsonl"),
             "FAKE_CLAUDE_LOG": str(self.claude_log),
             "FAKE_CLAUDE_COUNTER": str(root / "claude-counter"),
             "FAKE_CLAUDE_STATE": str(SCRIPTS / "issues_state.py"),
