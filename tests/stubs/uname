@@ -1,0 +1,4 @@
+#!/bin/sh
+# A uname that reports the system a test asks for (Darwin by default), so the
+# macOS-only paths of the driver can be exercised on Linux.
+echo "${FAKE_UNAME:-Darwin}"

@@ -137,8 +137,10 @@ anything yourself.
 - **Prerequisites and credentials.** It checks `git`, `gh`, `claude` and
   `python3`, that `gh` is authenticated, and resolves a token for the `claude`
   subprocesses it launches: `CLAUDE_CODE_OAUTH_TOKEN`, else that same export in
-  your shell rc, else `~/.claude/.credentials.json`. With none of those it exits
-  78 before starting rather than failing half-way through.
+  your shell rc, else `~/.claude/.credentials.json`, else (on macOS) a
+  `Claude Code-credentials` item in the Keychain, whose existence is checked
+  without ever reading the secret. With none of those it exits 78 before
+  starting rather than failing half-way through.
 
 - **The branch.** Derived from the issue list (`issues-165-166-170`) and cut by
   the driver, right before the first issue, from the base branch after it has

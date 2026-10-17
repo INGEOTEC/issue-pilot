@@ -6,6 +6,16 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-17
+
+### Fixed
+
+- `scripts/issues_run.sh` refused to start on macOS with "no credentials" for
+  anyone logged in with `claude login`, because the login lives in the Keychain
+  and there is no `~/.claude/.credentials.json`. On macOS it now also looks for
+  a `Claude Code-credentials` item in the Keychain (existence only, the secret
+  is never read), and the error message names it and suggests `claude login`.
+
 ## [0.3.1] - 2026-10-01
 
 ### Added

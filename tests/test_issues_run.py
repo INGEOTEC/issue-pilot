@@ -142,6 +142,72 @@ class Run(PilotTestCase):
         self.assertIn("/issue-pilot:init", out.stderr)
         self.assertEqual(self.claude_calls(), [])
 
+    def keychain_run(self, uname="Darwin", found="0"):
+        """Run the driver with no credentials anywhere but, maybe, a Keychain.
+
+        macOS is simulated: the suite runs on Linux, so `uname` prints Darwin
+        and `security` is a stub.  HOME is empty and both token variables are
+        gone, or the developer's own credentials would leak in.  Both stubs are
+        mandatory: on a real Mac they shadow the real tools, and the suite must
+        never consult the real Keychain.
+        """
+        self.install_stub("uname")
+        self.install_stub("security")
+        home = pathlib.Path(self.tmp.name) / "empty-home"
+        home.mkdir(exist_ok=True)
+        self.security_log = pathlib.Path(self.tmp.name) / "security.log"
+        env = dict(self.env)
+        for key in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+            env.pop(key, None)
+        env.update({"HOME": str(home), "FAKE_UNAME": uname,
+                    "FAKE_SECURITY_FOUND": found,
+                    "FAKE_SECURITY_LOG": str(self.security_log)})
+        self.env = env
+        return self.run_driver("--no-interview", "1")
+
+    def security_calls(self):
+        return (self.security_log.read_text().splitlines()
+                if self.security_log.exists() else [])
+
+    def test_a_keychain_item_counts_as_credentials_on_macos(self):
+        out = self.keychain_run(found="1")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("no credentials", out.stderr)
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_the_keychain_is_probed_by_service_name_and_never_read(self):
+        self.keychain_run(found="1")
+        calls = self.security_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn("find-generic-password", calls[0])
+        self.assertIn("Claude Code-credentials", calls[0])
+        # -w would print the secret: existence is all the driver may ask for.
+        self.assertNotIn("-w", calls[0].split())
+
+    def test_no_keychain_item_on_macos_is_still_exit_78_and_names_the_way_out(self):
+        out = self.keychain_run(found="0")
+        self.assertEqual(out.returncode, 78)
+        self.assertIn("no credentials", out.stderr)
+        self.assertIn("Keychain", out.stderr)
+        self.assertIn("claude login", out.stderr)
+        self.assertIn("claude setup-token", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_the_keychain_is_never_probed_outside_macos(self):
+        out = self.keychain_run(uname="Linux", found="1")
+        self.assertEqual(out.returncode, 78)
+        self.assertEqual(self.security_calls(), [])
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_a_token_variable_wins_without_asking_the_keychain(self):
+        self.install_stub("uname")
+        self.install_stub("security")
+        log = pathlib.Path(self.tmp.name) / "security.log"
+        out = self.run_driver("--no-interview", "1", env={
+            "FAKE_UNAME": "Darwin", "FAKE_SECURITY_LOG": str(log)})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(log.exists())
+
     def test_a_dirty_tree_stops_the_run_before_anything_happens(self):
         (self.repo / "README.md").write_text("modified\n")
         out = self.run_driver("--no-interview", "1")
