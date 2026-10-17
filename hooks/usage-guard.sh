@@ -398,7 +398,7 @@ classify() {
       scope=short
       verdict=ok
       if (( pct >= THRESHOLD )); then
-        verdict=wait
+        verdict="wait"
         # A small buffer past the reset, never a busy-spin, and never longer
         # than MAX_WAIT -- the cap is applied last, so configuring a short one
         # actually shortens the sleep instead of being overridden by the floor.
