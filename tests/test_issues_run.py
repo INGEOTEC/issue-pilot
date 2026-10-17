@@ -142,16 +142,17 @@ class Run(PilotTestCase):
         self.assertIn("/issue-pilot:init", out.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def keychain_run(self, uname="Darwin", found="0", security=True):
+    def keychain_run(self, uname="Darwin", found="0"):
         """Run the driver with no credentials anywhere but, maybe, a Keychain.
 
         macOS is simulated: the suite runs on Linux, so `uname` prints Darwin
         and `security` is a stub.  HOME is empty and both token variables are
-        gone, or the developer's own credentials would leak in.
+        gone, or the developer's own credentials would leak in.  Both stubs are
+        mandatory: on a real Mac they shadow the real tools, and the suite must
+        never consult the real Keychain.
         """
         self.install_stub("uname")
-        if security:
-            self.install_stub("security")
+        self.install_stub("security")
         home = pathlib.Path(self.tmp.name) / "empty-home"
         home.mkdir(exist_ok=True)
         self.security_log = pathlib.Path(self.tmp.name) / "security.log"
@@ -197,11 +198,6 @@ class Run(PilotTestCase):
         self.assertEqual(out.returncode, 78)
         self.assertEqual(self.security_calls(), [])
         self.assertEqual(self.claude_calls(), [])
-
-    def test_macos_without_a_security_tool_is_exit_78_not_a_crash(self):
-        out = self.keychain_run(found="1", security=False)
-        self.assertEqual(out.returncode, 78)
-        self.assertIn("no credentials", out.stderr)
 
     def test_a_token_variable_wins_without_asking_the_keychain(self):
         self.install_stub("uname")
