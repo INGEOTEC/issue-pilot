@@ -16,6 +16,11 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   model summary), and says whether the run is moving or why it is not: paused
   or halted by the guard. Once the driver has stopped, or when the run was
   never detached, it prints the full report as before.
+- The choice between the two is made in code, not by the model:
+  `/issue-pilot:status` is now one command, `issues_state.py report`, which
+  prints `report     : quick` or `report     : full`. The full report gathers
+  the run table, the usage guard's `--check` (an error line if it fails, never a
+  crash) and the tails of `driver.log` and of the latest session log itself.
 
 ## [0.4.0] - 2026-10-17
 

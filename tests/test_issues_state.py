@@ -337,8 +337,8 @@ class FixItems(RunState):
         self.assertIn("do the thing better", out)
 
 
-class Quick(PilotTestCase):
-    """`quick`: the answer `/issue-pilot:status` gives while the driver runs."""
+class QuickHelpers(PilotTestCase):
+    """A run of three issues in a repository, and the files `quick` reads."""
 
     def setUp(self):
         super().setUp()
@@ -362,6 +362,10 @@ class Quick(PilotTestCase):
     def guard_log(self, *lines):
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / "usage-guard.log").write_text("\n".join(lines) + "\n")
+
+
+class Quick(QuickHelpers):
+    """`quick`: the answer `/issue-pilot:status` gives while the driver runs."""
 
     def test_a_live_driver_pid_is_running(self):
         (self.log_dir() / "driver.pid").write_text(f"{os.getpid()}\n")
@@ -426,6 +430,116 @@ class Quick(PilotTestCase):
 
     def test_the_log_line_names_driver_log(self):
         self.assertIn("driver.log", self.quick())
+
+
+class Report(QuickHelpers):
+    """`report`: the one command `/issue-pilot:status` runs; it chooses."""
+
+    def lib_with_marking_guard(self):
+        """A copy of the plugin whose usage-guard.sh leaves a marker when run."""
+        lib = pathlib.Path(self.tmp.name) / "lib"
+        shutil.copytree(SCRIPTS, lib / "scripts")
+        (lib / "hooks").mkdir()
+        self.marker = pathlib.Path(self.tmp.name) / "guard-ran"
+        guard = lib / "hooks" / "usage-guard.sh"
+        guard.write_text(f"#!/bin/sh\ntouch '{self.marker}'\necho GUARD-CHECK-OUTPUT\n")
+        guard.chmod(0o755)
+        return lib
+
+    def report(self, lib=None):
+        script = (lib / "scripts" if lib else SCRIPTS) / "issues_state.py"
+        return subprocess.run([sys.executable, str(script), "report"], cwd=self.repo,
+                              capture_output=True, text=True, env=self.env)
+
+    def test_a_live_driver_gets_the_quick_answer_and_never_runs_the_guard(self):
+        lib = self.lib_with_marking_guard()
+        (self.log_dir() / "driver.pid").write_text(f"{os.getpid()}\n")
+        (self.log_dir() / "driver.log").write_text("SECRET-LOG-LINE\n")
+        out = self.report(lib)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(out.stdout.startswith("report     : quick\n"))
+        self.assertIn("driver     : running", out.stdout)
+        self.assertIn("progress   :", out.stdout)
+        self.assertNotIn("SECRET-LOG-LINE", out.stdout)
+        self.assertNotIn("GUARD-CHECK-OUTPUT", out.stdout)
+        self.assertFalse(self.marker.exists())
+
+    def assert_full(self, out, marker):
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(out.stdout.startswith("report     : full\n"))
+        self.assertIn("repository :", out.stdout)  # the status table
+        self.assertIn("--- usage ---", out.stdout)
+        self.assertIn("GUARD-CHECK-OUTPUT", out.stdout)
+        self.assertIn("--- driver.log", out.stdout)
+        self.assertIn(marker, out.stdout)
+        order = [out.stdout.index(x) for x in
+                 ("repository :", "--- usage ---", "--- driver.log")]
+        self.assertEqual(order, sorted(order))
+
+    def test_a_dead_driver_gets_the_full_report(self):
+        lib = self.lib_with_marking_guard()
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        (self.log_dir() / "driver.pid").write_text(f"{proc.pid}\n")
+        (self.log_dir() / "driver.log").write_text("one\nDRIVER-TAIL\n")
+        self.assert_full(self.report(lib), "DRIVER-TAIL")
+        self.assertTrue(self.marker.exists())
+
+    def test_no_driver_pid_gets_the_full_report(self):
+        lib = self.lib_with_marking_guard()
+        (self.log_dir() / "driver.log").write_text("DRIVER-TAIL\n")
+        self.assert_full(self.report(lib), "DRIVER-TAIL")
+
+    def test_the_full_report_tails_only_the_last_lines_of_a_log(self):
+        lib = self.lib_with_marking_guard()
+        (self.log_dir() / "driver.log").write_text(
+            "".join(f"line {i}\n" for i in range(200)))
+        out = self.report(lib).stdout
+        self.assertIn("line 199", out)
+        self.assertIn("line 160", out)
+        self.assertNotIn("line 159\n", out)
+
+    def test_the_full_report_includes_the_most_recent_session_log(self):
+        lib = self.lib_with_marking_guard()
+        old = self.log_dir() / "issue-1-attempt-1.log"
+        new = self.log_dir() / "issue-fix-1-attempt-1.log"
+        old.write_text("OLD-SESSION\n")
+        new.write_text("NEW-SESSION\n")
+        os.utime(old, (1, 1))
+        out = self.report(lib).stdout
+        self.assertIn("NEW-SESSION", out)
+        self.assertNotIn("OLD-SESSION", out)
+        self.assertIn("--- issue-fix-1-attempt-1.log", out)
+
+    def test_a_failing_guard_does_not_crash_the_report(self):
+        lib = self.lib_with_marking_guard()
+        guard = lib / "hooks" / "usage-guard.sh"
+        guard.write_text("#!/bin/sh\necho boom >&2\nexit 7\n")
+        out = self.report(lib)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("usage check failed (exit 7)", out.stdout)
+        self.assertIn("boom", out.stdout)
+        self.assertIn("--- driver.log", out.stdout)
+
+    def test_a_missing_guard_does_not_crash_the_report(self):
+        lib = self.lib_with_marking_guard()
+        (lib / "hooks" / "usage-guard.sh").unlink()
+        out = self.report(lib)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("usage check failed", out.stdout)
+
+    def test_without_a_run_it_fails_as_status_does(self):
+        shutil.rmtree(self.home / "state")
+        out = self.report()
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("no run in progress", out.stderr)
+
+    def test_status_md_is_one_unconditional_command(self):
+        text = (SCRIPTS.parent / "commands" / "status.md").read_text()
+        self.assertEqual(text.count("```bash"), 1)
+        self.assertIn("issues_state.py\" report", text)
+        self.assertNotIn("--check", text)
+        self.assertNotIn("if the driver", text.lower())
 
 
 if __name__ == "__main__":

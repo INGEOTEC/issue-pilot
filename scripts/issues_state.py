@@ -35,6 +35,10 @@ Subcommands
   quick The fast answer while a run is going: is the driver alive, how far it
         got and whether the usage guard has paused or halted it.  Reads only
         driver.pid and the guard's halt file and log tail; no network.
+  report  What /issue-pilot:status shows.  While the driver is running it is
+        `report     : quick` followed by `quick`; otherwise `report     : full`
+        followed by `status`, the usage guard's --check, and the tails of
+        driver.log and of the latest session log.
   path  Prints the state file for this repository.
 
 Where `<id>` appears, it is either an issue number or a review fix id
@@ -464,6 +468,71 @@ def cmd_quick(args):
     print(f"log        : {log_dir(state) / 'driver.log'}")
 
 
+REPORT_TAIL_LINES = 40
+GUARD_CHECK_TIMEOUT = 60
+
+
+def tail_lines(path, n=REPORT_TAIL_LINES):
+    """The last `n` lines of a file, reading only its end; [] if unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 64 * 1024))
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    return lines[-n:]
+
+
+def latest_attempt_log(state):
+    """The most recently written session log of the run, picked by mtime."""
+    logs = [p for pattern in ("issue-*-attempt-*.log", "fix-*-attempt-*.log")
+            for p in log_dir(state).glob(pattern)]
+    return max(logs, key=lambda p: p.stat().st_mtime, default=None)
+
+
+def guard_check():
+    """Output of `usage-guard.sh --check`, or a one-line error; never raises."""
+    root, _ = pilot_config.running_copy()
+    script = pathlib.Path(root) / "hooks" / "usage-guard.sh"
+    try:
+        out = subprocess.run([str(script), "--check"], capture_output=True,
+                             text=True, timeout=GUARD_CHECK_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"usage check failed: {exc}"
+    text = (out.stdout + out.stderr).strip()
+    if out.returncode != 0:
+        text = f"usage check failed (exit {out.returncode})" + (f":\n{text}" if text else "")
+    return text or "usage check printed nothing"
+
+
+def cmd_report(args):
+    """What `/issue-pilot:status` shows: the quick answer while the driver is
+    running, otherwise the full report.  The choice is made here, in code."""
+    state = load()
+    running = driver(state)
+    if running and running[1]:
+        print("report     : quick")
+        cmd_quick(args)
+        return
+    print("report     : full")
+    print()
+    cmd_status(args)
+    print()
+    print("--- usage ---")
+    print(guard_check())
+    print()
+    driver_log = log_dir(state) / "driver.log"
+    print(f"--- driver.log ({driver_log}) ---")
+    print("\n".join(tail_lines(driver_log)) or "(empty or missing)")
+    latest = latest_attempt_log(state)
+    if latest:
+        print()
+        print(f"--- {latest.name} ({latest}) ---")
+        print("\n".join(tail_lines(latest)) or "(empty)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -516,6 +585,7 @@ def main():
         func=lambda a: print(json.dumps(load(), indent=2, ensure_ascii=False)))
     sub.add_parser("status").set_defaults(func=cmd_status)
     sub.add_parser("quick").set_defaults(func=cmd_quick)
+    sub.add_parser("report").set_defaults(func=cmd_report)
     sub.add_parser("path").set_defaults(func=lambda a: print(state_path()))
 
     args = ap.parse_args()
