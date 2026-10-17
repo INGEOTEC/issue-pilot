@@ -122,16 +122,27 @@ if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
   done
 fi
 
+# On macOS `claude login` keeps the login in the Keychain, not in a file, so
+# there is no ~/.claude/.credentials.json to find.  Probe for the item without
+# -w: whether it exists is all that matters, and its secret is never read.
+keychain_has_credentials() {
+  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 1
+  command -v security >/dev/null 2>&1 || return 1
+  security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1
+}
+
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" \
-      && ! -f "$HOME/.claude/.credentials.json" ]]; then
+      && ! -f "$HOME/.claude/.credentials.json" ]] && ! keychain_has_credentials; then
   cat >&2 <<'MSG'
 error: no credentials for the `claude` subprocesses this driver launches.
 
-  Found no CLAUDE_CODE_OAUTH_TOKEN, no ANTHROPIC_API_KEY and no
-  ~/.claude/.credentials.json.  Being logged in inside a Claude Code session is
-  not enough: that token is not exported to subprocesses.
+  Found no CLAUDE_CODE_OAUTH_TOKEN, no ANTHROPIC_API_KEY, no
+  ~/.claude/.credentials.json and, on macOS, no `Claude Code-credentials` item
+  in the Keychain.  Being logged in inside a Claude Code session is not enough:
+  that token is not exported to subprocesses.
 
   Fix it with one of:
+    claude login
     claude setup-token
     export CLAUDE_CODE_OAUTH_TOKEN=...      (or put it in ~/.bashrc)
 MSG

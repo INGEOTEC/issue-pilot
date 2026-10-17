@@ -1,0 +1,5 @@
+#!/bin/sh
+# The macOS `security` tool, for the tests: logs its argv to $FAKE_SECURITY_LOG
+# and says the item exists (exit 0) only when FAKE_SECURITY_FOUND=1.
+[ -n "$FAKE_SECURITY_LOG" ] && echo "$*" >> "$FAKE_SECURITY_LOG"
+[ "$FAKE_SECURITY_FOUND" = "1" ]
