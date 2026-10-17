@@ -52,7 +52,9 @@ class Install(unittest.TestCase):
             [sys.executable, str(lib / "scripts" / "pilot_config.py"), "version"],
             capture_output=True, text=True)
         self.assertEqual(out.stdout.splitlines()[0], source_version)
-        self.assertEqual(out.stdout.splitlines()[1], str(lib))
+        # pilot_config.py prints a realpath; on macOS the temp dir sits behind
+        # the /var -> /private/var symlink, so resolve the expected side too.
+        self.assertEqual(out.stdout.splitlines()[1], str(lib.resolve()))
 
     def test_reinstalling_leaves_exactly_one_manifest(self):
         self.install()

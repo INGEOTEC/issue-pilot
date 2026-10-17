@@ -325,9 +325,27 @@ a run ends badly.
 ## The usage guard
 
 Registered as a `PreToolUse` hook, so it is reached on every tool call, but it
-only measures once every five minutes. It reads the `anthropic-ratelimit-unified-*`
-response headers of one 1-token Haiku request — every window the API reports,
-whatever it is called, rather than a hardcoded list.
+only measures once every five minutes. It reads every window the API reports,
+whatever it is called, rather than a hardcoded list, in one of two ways:
+
+- **`/api/oauth/usage`** — what the session's own `/usage` shows, and free: no
+  model request. It needs the `user:profile` scope, which a `claude login` token
+  has and a `claude setup-token` one does not.
+- **The `anthropic-ratelimit-unified-*` response headers** of one 1-token Haiku
+  request. It works with any token, which is why it stays: a setup-token (how a
+  remote, ssh-only machine is usually logged in) is refused by the endpoint
+  above.
+
+By default (`USAGE_GUARD_SOURCE=auto`) the first is tried and a 401/403 falls
+back to the second in the same run, so a machine only pays for the headers
+probe when it has to. Both feed the same decision.
+
+The token comes from, in order: `CLAUDE_CODE_OAUTH_TOKEN`, an `export` of it in
+`~/.bashrc`, `~/.zshrc` or `~/.profile`, `~/.claude/.credentials.json`, and — on
+macOS only, when none of those has one — the `Claude Code-credentials` item of
+the Keychain that `claude login` writes. It uses whatever token is there and
+never refreshes or writes one back; a stale token is a 401, and the call goes
+through.
 
 What it does with a reading depends on how long the window is, decided from the
 reading itself:
@@ -345,17 +363,52 @@ so you can still open Claude Code and look. Clear a halt with
 It must never break a session by accident, so any failure — no network, expired
 token, an unexpected payload — lets the tool call through.
 
-See it yourself at any time:
+See it yourself at any time with `/issue-pilot:usage`. It takes a live reading
+and tells you, per window, how much is used, when it
+resets and what the guard would do about it. It is read-only: it never clears a
+halt, it prints the `--clear` command for you to run. The same thing outside
+Claude Code:
 
 ```bash
 ~/.claude/issue-pilot/lib/hooks/usage-guard.sh --check   # or the plugin's copy
 ```
+
+`--check` prints exactly one JSON object, in every case, and always exits 0 —
+it never sleeps and never writes a halt:
+
+```json
+{
+  "source": "oauth_usage",
+  "thresholds": {"short": 70, "long": 90, "long_action": "halt", "max_wait": 21600},
+  "windows": [
+    {"window": "5h", "percent": 10, "seconds_until_reset": 3600,
+     "scope": "short", "verdict": "ok", "wait_seconds": 0}
+  ],
+  "halt": null
+}
+```
+
+- `source` — `oauth_usage` or `headers`, whichever produced the reading, or
+  `null` when none did (for instance a 429).
+- `windows` — every window the API named. From `/api/oauth/usage` they are
+  `5h`, `7d` and one `7d_<model>` per model-scoped weekly limit. `scope` is `long` for a window that
+  resets later than `max_wait`, `short` otherwise. `verdict` is `ok`, `wait`
+  (the hook would sleep `wait_seconds`), `halt`, `warn` or `ignore` (what
+  `USAGE_GUARD_LONG_ACTION` makes of a long window over its threshold).
+- `thresholds` — the limits the verdicts were reached under, following the
+  variables below.
+- `halt` — the text of a halt on record, or `null`.
+
+The verdict is produced by the same function the hook acts on, so `--check` is a
+dry run of the guard, not a second opinion about it. Without credentials it
+prints `{"error": ...}` instead, and the guard lets every call through.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `USAGE_GUARD_THRESHOLD` | `70` | Percent of a short window at which to start waiting. |
 | `USAGE_GUARD_LONG_THRESHOLD` | `90` | Percent of a long (weekly) window at which to halt. |
 | `USAGE_GUARD_LONG_ACTION` | `halt` | `halt`, `warn` or `ignore`. |
+| `USAGE_GUARD_SOURCE` | `auto` | `auto`, `headers` or `oauth`: which reading to take (see above). |
 | `USAGE_GUARD_INTERVAL` | `300` | Seconds between real measurements. |
 | `USAGE_GUARD_MAX_WAIT` | `21600` | Longest single sleep, and the line between a short and a long window. |
 | `USAGE_GUARD_MODEL` | `claude-haiku-4-5-20251001` | Model used for the probe. |
@@ -395,6 +448,7 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
 | `/issue-pilot:status` | The run in plain words, plus how much usage window is left. |
+| `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
 | `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch. |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
 | `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |

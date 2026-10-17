@@ -1,5 +1,10 @@
 #!/bin/sh
 # The macOS `security` tool, for the tests: logs its argv to $FAKE_SECURITY_LOG
-# and says the item exists (exit 0) only when FAKE_SECURITY_FOUND=1.
+# and says the item exists (exit 0) only when FAKE_SECURITY_FOUND=1.  Asked for
+# the secret itself (-w), it prints $FAKE_SECURITY_SECRET.
 [ -n "$FAKE_SECURITY_LOG" ] && echo "$*" >> "$FAKE_SECURITY_LOG"
-[ "$FAKE_SECURITY_FOUND" = "1" ]
+if [ "$FAKE_SECURITY_FOUND" = "1" ]; then
+  case " $* " in *" -w "*) printf '%s\n' "$FAKE_SECURITY_SECRET" ;; esac
+  exit 0
+fi
+exit 1
