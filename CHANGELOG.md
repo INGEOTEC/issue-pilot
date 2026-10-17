@@ -6,17 +6,10 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Added
 
-- The usage guard reads the macOS Keychain (`Claude Code-credentials`) as a
-  fourth source of credentials, after the environment variable, the shell rc
-  and `~/.claude/.credentials.json`, so it measures on a Mac logged in with
-  `claude login`. Before, it found no credentials there and let every call
-  through.
-- The guard can read `GET /api/oauth/usage` (what `/usage` shows, no model
-  request) as well as the rate-limit headers of a 1-token request, chosen by
-  `USAGE_GUARD_SOURCE`: `auto` (default; the endpoint first, the headers when
-  the token cannot use it), `headers` or `oauth`.
 - `/issue-pilot:usage` shows how much of each usage window is left, when it
   resets and what the usage guard would do about it. It runs
   `hooks/usage-guard.sh --check` and measures nothing itself; it is read-only
@@ -26,6 +19,15 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `--check` reports, so `--check` is a dry run of the code that stops a session.
   Hook mode behaves as before. `--check` gains `thresholds`, and per window
   `scope`, `verdict` and `wait_seconds`.
+- The usage guard reads the macOS Keychain (`Claude Code-credentials`) as a
+  fourth source of credentials, after the environment variable, the shell rc
+  and `~/.claude/.credentials.json`, so it measures on a Mac logged in with
+  `claude login`. Before, it found no credentials there and let every call
+  through.
+- The guard can read `GET /api/oauth/usage` (what `/usage` shows, no model
+  request) as well as the rate-limit headers of a 1-token request, chosen by
+  `USAGE_GUARD_SOURCE`: `auto` (default; the endpoint first, the headers when
+  the token cannot use it), `headers` or `oauth`.
 
 ### Changed
 
