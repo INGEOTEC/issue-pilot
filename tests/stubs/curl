@@ -1,16 +1,39 @@
 #!/usr/bin/env python3
-"""A curl that returns the headers a test asks for.
+"""A curl that returns what a test asks for, for either usage endpoint.
 
-The usage guard calls curl as `curl ... -o /dev/null -D <file> -w '%{http_code}'`,
-so this writes $FAKE_HEADERS to the file after -D and prints $FAKE_CODE.  Faking
-the headers is the only way to reach the interesting branches of the guard
-without waiting five hours for a real window to fill.
+The usage guard reads usage two ways.  The header probe calls
+`curl ... -o /dev/null -D <file> -w '%{http_code}' <api>/v1/messages`: this
+writes $FAKE_HEADERS to the file after -D and prints $FAKE_CODE.  The
+/api/oauth/usage reader calls the same shape against /api/oauth/usage: this
+prints $FAKE_OAUTH_CODE (403 by default, i.e. a token that cannot use that
+endpoint, so a test that knows nothing of it falls through to the header probe),
+writes $FAKE_OAUTH_BODY to the -o file and $FAKE_OAUTH_HEADERS to the -D file.
+Faking the answers is the only way to reach the interesting branches of the
+guard without waiting five hours for a real window to fill.
+
+Every call's argv is appended to $FAKE_CURL_LOG, when set, so a test can say
+which endpoints were hit and in what order.
 """
 import os
 import sys
 
 argv = sys.argv[1:]
+if os.environ.get("FAKE_CURL_LOG"):
+    with open(os.environ["FAKE_CURL_LOG"], "a") as log:
+        log.write(" ".join(argv) + "\n")
+
+oauth = any("/api/oauth/usage" in arg for arg in argv)
+if oauth:
+    headers = os.environ.get("FAKE_OAUTH_HEADERS", "")
+    code = os.environ.get("FAKE_OAUTH_CODE", "403")
+else:
+    headers = os.environ.get("FAKE_HEADERS", "")
+    code = os.environ.get("FAKE_CODE", "200")
+
 if "-D" in argv:
     with open(argv[argv.index("-D") + 1], "w") as fh:
-        fh.write(os.environ.get("FAKE_HEADERS", ""))
-sys.stdout.write(os.environ.get("FAKE_CODE", "200"))
+        fh.write(headers)
+if oauth and "-o" in argv and argv[argv.index("-o") + 1] != "/dev/null":
+    with open(argv[argv.index("-o") + 1], "w") as fh:
+        fh.write(os.environ.get("FAKE_OAUTH_BODY", ""))
+sys.stdout.write(code)

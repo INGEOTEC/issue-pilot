@@ -18,8 +18,11 @@ about it right now.
    of it. Do not compare percentages against thresholds yourself — report the
    `verdict` it gives.
 
-   Tell the reader it costs one 1-token Haiku request, and that the figures are
-   a live reading, not a cached one.
+   Tell the reader where the figures came from (the `source` key) and that they
+   are a live reading, not a cached one: `oauth_usage` is a free read of the
+   account's usage, the same figures `/usage` shows; `headers` is one 1-token
+   Haiku request, used when the token cannot read that (a `claude setup-token`
+   one). A `source` of `null` means nothing was read.
 
 2. The output is one JSON object:
 
@@ -27,6 +30,7 @@ about it right now.
      whatever comes back; do not assume a fixed list) with `percent`,
      `seconds_until_reset`, `scope` (`short` is waited out, `long` cannot be),
      `verdict` and `wait_seconds`.
+   - `source` — `oauth_usage`, `headers`, or `null`.
    - `thresholds` — the limits the verdicts were reached under.
    - `halt` — the text of a halt already on record, or `null`.
 
