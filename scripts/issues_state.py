@@ -32,6 +32,9 @@ Subcommands
         Records the pull request that closes the run.
   show  Dumps the whole state as JSON.
   status  The same thing for a human: what is done, what is next, what stopped.
+  quick The fast answer while a run is going: is the driver alive, how far it
+        got and whether the usage guard has paused or halted it.  Reads only
+        driver.pid and the guard's halt file and log tail; no network.
   path  Prints the state file for this repository.
 
 Where `<id>` appears, it is either an issue number or a review fix id
@@ -77,6 +80,11 @@ def sort_key(item):
     return (0, item) if isinstance(item, int) else (1, item)
 
 
+def label(n):
+    """`#4` for an issue, `fix-2` for a review fix."""
+    return str(n) if str(n).startswith("fix-") else f"#{n}"
+
+
 def now():
     return datetime.datetime.now(datetime.timezone.utc).replace(
         microsecond=0).isoformat()
@@ -115,6 +123,64 @@ def driver(state):
     except PermissionError:
         return pid, True
     return pid, True
+
+
+GUARD_TAIL_BYTES = 64 * 1024
+GUARD_PAUSE = re.compile(
+    r"^(\S+) throttling: (\S+) window at (\d+)% >= \d+%, sleeping (\d+)s")
+
+
+def guard_halt_file():
+    return pilot_config.home() / "usage-guard.halt"
+
+
+def guard_log_file():
+    return pilot_config.home() / "usage-guard.log"
+
+
+def guard_state(at=None):
+    """What the usage guard is doing, from the files it leaves; no probe.
+
+    `halted -- <reason>` while `usage-guard.halt` exists.  `paused until ...`
+    when the last `throttling:` / `resuming after wait` line of the log is a
+    `throttling:` whose sleep has not ended.  `ok` otherwise.  The log is shared
+    by every session under the home, which is right: the windows are
+    account-wide, so a pause logged by any of them holds this run too.
+    """
+    halt = guard_halt_file()
+    if halt.exists():
+        return f"halted -- {halt.read_text().strip() or 'no reason recorded'}"
+    log = guard_log_file()
+    try:
+        with open(log, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - GUARD_TAIL_BYTES))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return "ok"
+    lines = tail.splitlines()
+    if size > GUARD_TAIL_BYTES:
+        lines = lines[1:]  # the first line is cut in the middle
+    for line in reversed(lines):
+        if " resuming after wait" in line:
+            return "ok"
+        m = GUARD_PAUSE.match(line)
+        if not m:
+            continue
+        try:
+            start = datetime.datetime.strptime(
+                m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=datetime.timezone.utc)
+        except ValueError:
+            return "ok"
+        until = start + datetime.timedelta(seconds=int(m.group(4)))
+        current = at or datetime.datetime.now(datetime.timezone.utc)
+        if until <= current:
+            return "ok"
+        return (f"paused until {until:%Y-%m-%d %H:%M:%S} UTC "
+                f"({m.group(2)} at {m.group(3)}%)")
+    return "ok"
 
 
 def load():
@@ -322,9 +388,6 @@ def cmd_status(args):
     state = load()
     attempts = state.get("attempts", {})
 
-    def label(n):
-        return str(n) if str(n).startswith("fix-") else f"#{n}"
-
     root, version = pilot_config.running_copy()
     print(f"issue-pilot: {version or 'unknown'}")
     print(f"             {root}")
@@ -383,6 +446,24 @@ def cmd_status(args):
         print(state["notes"])
 
 
+def cmd_quick(args):
+    """Is the run moving?  Only reads small files; no network, no session logs."""
+    state = load()
+    running = driver(state)
+    if running is None:
+        print("driver     : not detached")
+    else:
+        pid, alive = running
+        print(f"driver     : {'running' if alive else 'not running'} (pid {pid})")
+    statuses = state["status"]
+    done = sum(1 for v in statuses.values() if v == "done")
+    current = next((label(i["issue"]) for i in state["plan"]
+                    if statuses[str(i["issue"])] != "done"), None)
+    print(f"progress   : {done}/{len(statuses)} done, current {current or '-'}")
+    print(f"guard      : {guard_state()}")
+    print(f"log        : {log_dir(state) / 'driver.log'}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -434,6 +515,7 @@ def main():
     sub.add_parser("show").set_defaults(
         func=lambda a: print(json.dumps(load(), indent=2, ensure_ascii=False)))
     sub.add_parser("status").set_defaults(func=cmd_status)
+    sub.add_parser("quick").set_defaults(func=cmd_quick)
     sub.add_parser("path").set_defaults(func=lambda a: print(state_path()))
 
     args = ap.parse_args()

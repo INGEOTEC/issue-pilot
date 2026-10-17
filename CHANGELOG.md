@@ -6,6 +6,17 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-17
+
+### Changed
+
+- `/issue-pilot:status` answers at once while a detached run is going. It runs
+  the new `issues_state.py quick`, which reads `driver.pid`, the run state and
+  the usage guard's halt file and log (no `--check` probe, no session logs, no
+  model summary), and says whether the run is moving or why it is not: paused
+  or halted by the guard. Once the driver has stopped, or when the run was
+  never detached, it prints the full report as before.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added
@@ -199,7 +210,9 @@ First public release.
 - Tests covering the dependency rule, the run state, configuration precedence
   and the guard's decisions, using only the standard library.
 
-[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/INGEOTEC/issue-pilot/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/INGEOTEC/issue-pilot/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/INGEOTEC/issue-pilot/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.3.1
 [0.3.0]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.3.0
 [0.2.1]: https://github.com/INGEOTEC/issue-pilot/releases/tag/v0.2.1

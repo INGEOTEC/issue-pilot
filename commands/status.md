@@ -5,32 +5,46 @@ allowed-tools: Bash
 
 Report the state of the issue-pilot run in this repository.
 
-1. Print the run itself:
+1. Ask the quick question first:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" status
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" quick
    ```
 
    If it says no run is in progress, say exactly that and stop — that is not an
    error, it just means nothing has been started here.
 
-   The `driver` line says whether a detached run is still going. **Running** and
-   stalled are not the same thing: check the tail of `driver.log` to see what it
-   is doing before telling the user it is stuck.
+   If its `driver` line says **running**, relay the lines it printed (pid,
+   progress, guard state) and **stop**: do not run the steps below, do not run
+   `--check`, do not read any log and do not summarise. If `guard` says `paused`
+   or `halted`, say plainly that this is why the run is not moving (a halt needs
+   `usage-guard.sh --clear` and `issues_run.sh --resume --detach`; a pause ends
+   by itself).
 
-2. Print how much of the usage windows is left, since that is what decides
+   If the driver is **not running**, or is **not detached**, go on with the full
+   report below.
+
+2. Print the run itself:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" status
+   ```
+
+   The `driver` line says whether a detached run is still going.
+
+3. Print how much of the usage windows is left, since that is what decides
    whether a run can continue right now:
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/hooks/usage-guard.sh" --check
    ```
 
-3. Read the tail of the most recent log in that directory — `driver.log` for the
+4. Read the tail of the most recent log in that directory — `driver.log` for the
    run as a whole, `issue-<n>-attempt-<k>.log` for the issue being worked on. If
    the run stopped on a blocked issue, summarise **why** from that log: the
    actual error, not just "it failed".
 
-4. Summarise for the reader, briefly: the running issue-pilot version and where
+5. Summarise for the reader, briefly: the running issue-pilot version and where
    it runs from, what is done, what is pending, whether the driver is still
    running, the model and effort level the run's sessions are using (when the
    state has them), and whether the usage windows allow it now. Name any

@@ -4,7 +4,9 @@ Every guarantee the driver relies on is here -- that `next` hands out issues in
 order, that a blocked run stops, that `--resume` can reopen it -- so these tests
 are really tests of the driver's control flow.
 """
+import datetime
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -333,6 +335,97 @@ class FixItems(RunState):
         out = self.run_script("issues_state.py", "status").stdout
         self.assertIn("fix-1", out)
         self.assertIn("do the thing better", out)
+
+
+class Quick(PilotTestCase):
+    """`quick`: the answer `/issue-pilot:status` gives while the driver runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_issues({1: issue(1, "first"), 2: issue(2, "second"),
+                           3: issue(3, "third")})
+        self.run_script("issues_state.py", "init", "1", "2", "3",
+                        "--branch", "issues-1-2-3")
+
+    def quick(self):
+        return self.run_script("issues_state.py", "quick").stdout
+
+    def log_dir(self):
+        d = self.home / "logs" / "issues-1-2-3"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def stamp(self, ago=0):
+        t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ago)
+        return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def guard_log(self, *lines):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "usage-guard.log").write_text("\n".join(lines) + "\n")
+
+    def test_a_live_driver_pid_is_running(self):
+        (self.log_dir() / "driver.pid").write_text(f"{os.getpid()}\n")
+        self.assertIn(f"driver     : running (pid {os.getpid()})", self.quick())
+
+    def test_a_dead_driver_pid_is_not_running(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        (self.log_dir() / "driver.pid").write_text(f"{proc.pid}\n")
+        self.assertIn(f"driver     : not running (pid {proc.pid})", self.quick())
+
+    def test_no_driver_pid_is_not_detached(self):
+        self.assertIn("driver     : not detached", self.quick())
+
+    def test_without_a_run_it_says_so(self):
+        shutil.rmtree(self.home / "state")
+        out = self.run_script("issues_state.py", "quick", check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("no run in progress", out.stderr)
+
+    def test_a_halt_file_is_shown_with_its_text(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "usage-guard.halt").write_text("weekly window at 97%\n")
+        self.assertIn("guard      : halted -- weekly window at 97%", self.quick())
+
+    def test_a_pause_that_has_not_ended_is_shown_with_its_window(self):
+        self.guard_log(f"{self.stamp(60)} throttling: 5h window at 81% >= 70%, sleeping 3600s")
+        out = self.quick()
+        self.assertIn("guard      : paused until", out)
+        self.assertIn("(5h at 81%)", out)
+
+    def test_a_pause_followed_by_resuming_is_ok(self):
+        self.guard_log(f"{self.stamp(60)} throttling: 5h window at 81% >= 70%, sleeping 3600s",
+                       f"{self.stamp(10)} resuming after wait")
+        self.assertIn("guard      : ok", self.quick())
+
+    def test_a_pause_whose_sleep_has_ended_is_ok(self):
+        self.guard_log(f"{self.stamp(7200)} throttling: 5h window at 81% >= 70%, sleeping 3600s")
+        self.assertIn("guard      : ok", self.quick())
+
+    def test_no_guard_files_is_ok(self):
+        self.assertIn("guard      : ok", self.quick())
+
+    def test_a_pause_is_found_in_the_tail_of_a_large_log(self):
+        filler = [f"{self.stamp(5000)} ok: 5h window at 10% (threshold 70%)"] * 5000
+        self.guard_log(*filler,
+                       f"{self.stamp(5)} throttling: 5h window at 81% >= 70%, sleeping 3600s")
+        self.assertIn("guard      : paused until", self.quick())
+
+    def test_progress_counts_done_items_and_names_the_current_one(self):
+        self.run_script("issues_state.py", "done", "1")
+        self.assertIn("progress   : 1/3 done, current #2", self.quick())
+
+    def test_progress_names_a_fix_as_current(self):
+        for n in "123":
+            self.run_script("issues_state.py", "done", n)
+        desc = pathlib.Path(self.tmp.name) / "fix.txt"
+        desc.write_text("do the thing better\n")
+        self.run_script("issues_state.py", "fix-add", "--description-file", str(desc),
+                        "--issues", "1")
+        self.assertIn("progress   : 3/4 done, current fix-1", self.quick())
+
+    def test_the_log_line_names_driver_log(self):
+        self.assertIn("driver.log", self.quick())
 
 
 if __name__ == "__main__":
