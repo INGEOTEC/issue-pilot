@@ -6,6 +6,24 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `/issue-pilot:usage` shows how much of each usage window is left, when it
+  resets and what the usage guard would do about it. It runs
+  `hooks/usage-guard.sh --check` and measures nothing itself; it is read-only
+  and prints the `--clear` command rather than running it.
+- The guard's per-window decision (`ok`, `wait`, `halt`, `warn`, `ignore`, and
+  the wait it would sleep) now lives in one function that hook mode acts on and
+  `--check` reports, so `--check` is a dry run of the code that stops a session.
+  Hook mode behaves as before. `--check` gains `thresholds`, and per window
+  `scope`, `verdict` and `wait_seconds`.
+
+### Changed
+
+- `usage-guard.sh --check` always prints exactly one JSON object: a halt on
+  record is now the `halt` key (its text, or `null`) instead of `halted:` lines
+  printed after the JSON.
+
 ## [0.3.2] - 2026-10-17
 
 ### Fixed

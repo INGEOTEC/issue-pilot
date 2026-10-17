@@ -28,9 +28,11 @@
 #
 # Modes:
 #   usage-guard.sh            hook mode: measure, then wait or halt
-#   usage-guard.sh --check    probe now regardless of the interval, print JSON,
-#                             never sleep, never block (used by the run driver
-#                             and by /issue-pilot:status)
+#   usage-guard.sh --check    probe now regardless of the interval, print one JSON
+#                             object -- the readings, the verdict hook mode would
+#                             reach on each, the thresholds and any halt on
+#                             record -- never sleep, never block (used by the run
+#                             driver, /issue-pilot:status and /issue-pilot:usage)
 #   usage-guard.sh --clear    forget a recorded halt
 
 set -uo pipefail
@@ -194,19 +196,77 @@ for key, value in sorted(h.items()):
   rm -f "$hdr"
 }
 
+# ---------------------------------------------------------------- the verdict
+# The one place a reading becomes a decision, shared by hook mode (which acts on
+# it) and --check (which only reports it), so --check is a dry run of the very
+# code that stops a session rather than a second opinion about it.
+#
+# Reads probe's '<window> <percent> <seconds-until-reset>' lines and prints, per
+# window:
+#   <window> <percent> <seconds-until-reset> <scope> <verdict> <wait-seconds>
+# scope   short | long -- long is a window that resets later than MAX_WAIT
+# verdict ok | wait | halt | warn | ignore
+# It only classifies: it never sleeps, logs, writes a file or exits non-zero.
+classify() {
+  local window pct left scope verdict wait_for
+  while read -r window pct left; do
+    [ -n "${window:-}" ] || continue
+    wait_for=0
+    if (( left > 0 && left > MAX_WAIT )); then
+      # Long window: cannot be waited out.
+      scope=long
+      verdict=ok
+      if (( pct >= LONG_THRESHOLD )); then
+        case "$LONG_ACTION" in
+          ignore) verdict=ignore ;;
+          warn)   verdict=warn ;;
+          *)      verdict=halt ;;
+        esac
+      fi
+    else
+      scope=short
+      verdict=ok
+      if (( pct >= THRESHOLD )); then
+        verdict=wait
+        # A small buffer past the reset, never a busy-spin, and never longer
+        # than MAX_WAIT -- the cap is applied last, so configuring a short one
+        # actually shortens the sleep instead of being overridden by the floor.
+        wait_for=$(( left + 60 ))
+        (( wait_for < 60 )) && wait_for=60
+        (( wait_for > MAX_WAIT )) && wait_for=$MAX_WAIT
+      fi
+    fi
+    printf '%s %s %s %s %s %s\n' "$window" "$pct" "$left" "$scope" "$verdict" "$wait_for"
+  done
+}
+
 # --------------------------------------------------------------- check mode
 if [ "$MODE" = check ]; then
-  probe | python3 -c "
-import json, sys
+  probe | classify | THRESHOLD="$THRESHOLD" LONG_THRESHOLD="$LONG_THRESHOLD" \
+    LONG_ACTION="$LONG_ACTION" MAX_WAIT="$MAX_WAIT" HALT="$HALT" python3 -c "
+import json, os, sys
 windows = []
 for line in sys.stdin:
     parts = line.split()
-    if len(parts) == 3:
+    if len(parts) == 6:
         windows.append({'window': parts[0], 'percent': int(parts[1]),
-                        'seconds_until_reset': int(parts[2])})
-print(json.dumps({'windows': windows}, indent=2))
+                        'seconds_until_reset': int(parts[2]),
+                        'scope': parts[3], 'verdict': parts[4],
+                        'wait_seconds': int(parts[5])})
+try:
+    with open(os.environ['HALT']) as fh:
+        halt = fh.read().strip() or None
+except OSError:
+    halt = None
+print(json.dumps({
+    'thresholds': {'short': int(os.environ['THRESHOLD']),
+                   'long': int(os.environ['LONG_THRESHOLD']),
+                   'long_action': os.environ['LONG_ACTION'],
+                   'max_wait': int(os.environ['MAX_WAIT'])},
+    'windows': windows,
+    'halt': halt,
+}, indent=2))
 "
-  [ -r "$HALT" ] && { echo "halted:"; cat "$HALT"; }
   exit 0
 fi
 
@@ -219,31 +279,19 @@ for _ in 1 2 3; do
   halt_reason=""
   ok=1
 
-  while read -r window pct left; do
+  while read -r window pct left scope verdict wait_for; do
     [ -n "${window:-}" ] || continue
-    if (( left > 0 && left > MAX_WAIT )); then
-      # Long window: cannot be waited out.
-      if (( pct >= LONG_THRESHOLD )); then
-        case "$LONG_ACTION" in
-          ignore) : ;;
-          warn) log "warning: ${window} window at ${pct}% (threshold ${LONG_THRESHOLD}%)" ;;
-          *)    halt_reason="${window} window at ${pct}% (threshold ${LONG_THRESHOLD}%), resets in $(( left / 3600 ))h" ;;
-        esac
-      fi
-    elif (( pct >= THRESHOLD )); then
-      ok=0
-      # A small buffer past the reset, never a busy-spin, and never longer
-      # than MAX_WAIT -- the cap is applied last, so configuring a short one
-      # actually shortens the sleep instead of being overridden by the floor.
-      wait_for=$(( left + 60 ))
-      (( wait_for < 60 )) && wait_for=60
-      (( wait_for > MAX_WAIT )) && wait_for=$MAX_WAIT
-      (( wait_for > worst_wait )) && worst_wait=$wait_for
-      log "throttling: ${window} window at ${pct}% >= ${THRESHOLD}%, sleeping ${wait_for}s"
-    else
-      log "ok: ${window} window at ${pct}% (threshold ${THRESHOLD}%)"
-    fi
-  done <<<"$readings"
+    case "$verdict" in
+      halt) halt_reason="${window} window at ${pct}% (threshold ${LONG_THRESHOLD}%), resets in $(( left / 3600 ))h" ;;
+      warn) log "warning: ${window} window at ${pct}% (threshold ${LONG_THRESHOLD}%)" ;;
+      wait)
+        ok=0
+        (( wait_for > worst_wait )) && worst_wait=$wait_for
+        log "throttling: ${window} window at ${pct}% >= ${THRESHOLD}%, sleeping ${wait_for}s"
+        ;;
+      ok) [ "$scope" = short ] && log "ok: ${window} window at ${pct}% (threshold ${THRESHOLD}%)" ;;
+    esac
+  done < <(classify <<<"$readings")
 
   if [ -n "$halt_reason" ]; then
     printf '%s\n' "$halt_reason" >"$HALT"
