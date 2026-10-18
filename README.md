@@ -447,7 +447,7 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:init` | Configures issue-pilot for this repository and opens the pull request that lands it. Run it once, before anything else. |
 | `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
-| `/issue-pilot:status` | The run in plain words, plus how much usage window is left. |
+| `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
 | `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch. |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
