@@ -265,14 +265,14 @@ not have stops the run rather than being reset — those are somebody's unpushed
 work — and the driver lists them. `--from-head` is the deliberate exception.
 Never one branch per issue, and never a pull request per issue.
 
-**And you end up back on it.** When the run finishes, the driver checks the base
-branch out again: the work is on the run branch, pushed by the pull request
-step, and a repository left on `issues-165-166-170` looks a week later like
-somebody is still working there. `/issue-pilot:pr` does the same after
-opening the pull request, and `/issue-pilot:close` pulls the merge and
-deletes the local run branch once everything on it is on origin. A run that
-stops early — a blocker, a session that kept dying — stays on its branch, where
-the unfinished work is.
+**And you stay on it.** When the run finishes — and after a `--resume` or a
+`--fix` — the driver leaves the run branch checked out: the next step is
+reviewing the work, and that is where it is. `/issue-pilot:pr` is what goes back
+to the base branch, after opening the pull request (with `--pr`, the driver only
+does so once the pull request is recorded; a failed one leaves you on the work),
+and `/issue-pilot:close` pulls the merge and deletes the local run branch once
+everything on it is on origin. A run that stops early — a blocker, a session
+that kept dying — stays on its branch too, where the unfinished work is.
 
 **Planning happens on the same code, and the issue remembers which.**
 `/issue-pilot:plan` puts the repository on the base branch at origin's

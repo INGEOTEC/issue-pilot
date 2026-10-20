@@ -43,12 +43,13 @@ class Run(PilotTestCase):
                          self.git("rev-parse", "main"))
         self.assertEqual(self.state()["base_branch"], "main")
 
-    def test_a_finished_run_hands_the_tree_back_on_the_base_branch(self):
-        # Every session ran on the run branch; nobody should find the
-        # repository left there afterwards, as if work were still going on.
+    def test_a_finished_run_stays_on_the_run_branch_for_review(self):
+        # The next step is reviewing the work, and it is on the run branch.
         out = self.run_driver("--no-interview", "1", "2", check=True)
-        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
-        self.assertIn("back on main", out.stdout)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1-2")
+        self.assertNotIn("back on main", out.stdout)
+        self.assertIn("branch issues-1-2", out.stdout.splitlines()[-1])
+        self.assertIn("/issue-pilot:pr", out.stdout.splitlines()[-1])
         # The work is all on the run branch, and the base branch was not moved.
         self.assertEqual(self.git("rev-list", "--count", "main..issues-1-2"), "2")
         self.assertEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
@@ -59,17 +60,25 @@ class Run(PilotTestCase):
         # issue #1, then the pull request session -- both with the work checked out.
         self.assertEqual(self.claude_branches(), ["issues-1", "issues-1"])
         self.assertIn("/issue-pilot:pr", self.claude_calls()[-1][1])
+        self.assertIn("pull_request", self.state())
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+
+    def test_a_pull_request_session_that_records_nothing_leaves_the_work_checked_out(self):
+        out = self.run_driver("--pr", "--no-interview", "1",
+                              env=self.plan("done", "nopr"), check=True)
+        self.assertNotIn("pull_request", self.state())
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1")
+        self.assertNotIn("back on main", out.stdout)
 
     def test_a_run_that_stops_early_stays_where_the_unfinished_work_is(self):
         self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1-3")
 
-    def test_a_resumed_run_also_ends_on_the_base_branch(self):
+    def test_a_resumed_run_also_ends_on_the_run_branch(self):
         self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
         self.run_driver("--resume", check=True)
         self.assertEqual(self.state()["status"], {"1": "done", "3": "done"})
-        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1-3")
 
     @staticmethod
     def session_of(call):
@@ -257,8 +266,8 @@ class Run(PilotTestCase):
         self._git("commit", "-qm", "feature work")
         self.run_driver("--no-interview", "1", check=True)
         self.assertNotIn("elsewhere.txt", self.git("ls-tree", "--name-only", "issues-1"))
-        # The feature branch is left as it was; the tree ends on the base branch.
-        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        # The feature branch is left as it was; the tree ends on the run branch.
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1")
         self.assertIn("elsewhere.txt", self.git("ls-tree", "--name-only", "feat/elsewhere"))
         self.assertEqual(self.git("merge-base", "issues-1", "origin/main"),
                          self.git("rev-parse", "origin/main"))
@@ -431,7 +440,8 @@ class FixRuns(Run):
         self.assertIn("/issue-pilot:one fix-1", calls[0][1])
         self.assertEqual(self.session_of(calls[0]), ("--resume", session))
         self.assertEqual(self.state()["status"]["fix-1"], "done")
-        self.assertIn("back on main", out.stdout)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1")
+        self.assertNotIn("back on main", out.stdout)
 
     def test_a_fix_naming_no_issue_starts_a_fresh_conversation(self):
         self.run_driver("--no-interview", "1", check=True)

@@ -39,9 +39,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" show
 
 ## 2. Read the work, without checking anything out
 
-The run branch is not checked out here — the driver does that itself when it
-applies the fix. Everything needed is reachable through git refs, from wherever
-the repository currently is:
+Checking the run branch out is not this command's job — the driver does that
+itself when it applies the fix, and it is usually checked out already, since a
+finished run leaves it that way. Everything needed is reachable through git
+refs, from wherever the repository currently is:
 
 ```bash
 git log --oneline <base_commit>..<branch>
@@ -113,7 +114,7 @@ something, so re-read the message and go back rather than retrying blindly.
 
 `--fix` continues the run recorded in the state: no questions, no
 re-initialisation, no unblocking of anything else — it applies the one fix that
-is now `pending` and returns to the base branch when done. `--detach` puts it
+is now `pending` and leaves the run branch checked out when done. `--detach` puts it
 in a session of its own, exactly as `/issue-pilot:run` does, and returns at
 once with the log path.
 

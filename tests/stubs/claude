@@ -11,6 +11,11 @@ one per invocation:
            mid-task, which is what the driver's retries exist for)
   nothing  change nothing at all and exit
   block    declare a real blocker, which stops the run without retries
+  nopr     in the pull request session: open nothing, record nothing (a pr
+           session that failed); any other outcome records a pull request
+
+The pull request session (`/issue-pilot:pr`) does not touch the branch: the
+driver decides where the tree ends up from the state, not from what it left.
 
 Anything past the end of the plan is "done".
 """
@@ -60,6 +65,10 @@ if issue and action == "done":
     head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                           text=True).stdout.strip()
     run(sys.executable, state, "done", issue, "--commit", head)
+
+if "/issue-pilot:pr" in prompt and action != "nopr":
+    run(sys.executable, state, "pr", "https://example.invalid/pull/1",
+        "--number", "1", "--base", "main")
 
 if issue and action == "block":
     run(sys.executable, state, "block", issue, "--reason", "staged blocker")

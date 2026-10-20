@@ -6,6 +6,23 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-20
+
+### Changed
+
+- A finished run, a `--resume` and a `--fix` now leave the run branch checked
+  out instead of going back to the base branch: the next step is reviewing the
+  work, and every review used to start with a manual `git checkout`. The
+  driver's last message says which branch is checked out and that
+  `/issue-pilot:pr` is the next step. A run that stops early stayed on its branch
+  already, and still does.
+- Going back to the base branch now happens only when the pull request is
+  opened. With `--pr` the driver does it itself, and only once the pull request
+  is recorded in the state, not from whatever branch the pr session left; a pr
+  session that failed leaves you on the work. `/issue-pilot:pr` still ends on
+  the base branch, as before.
+- `commands/run.md`, `commands/fix.md`, `commands/pr.md` and the README say so.
+
 ## [0.4.1] - 2026-10-17
 
 ### Changed

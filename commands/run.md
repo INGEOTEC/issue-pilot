@@ -147,10 +147,11 @@ anything yourself.
   been checked out, fetched and fast-forwarded to origin's tip — every time. A
   local base branch with commits origin does not have stops the run rather than
   being reset. The commit the branch was cut from is kept in the state. One
-  branch for the whole run, not one per issue. When the run finishes the driver checks
-  the base branch back out: the work is on the run branch, and a repository
-  left on `issues-165-166-170` looks like somebody is still working there. A
-  run that stopped early stays on its branch, where the unfinished work is.
+  branch for the whole run, not one per issue. When the run finishes — or a
+  `--resume` or a `--fix` does — the driver leaves the run branch checked out:
+  the next step is reviewing the work, and that is where it is. Only
+  `/issue-pilot:pr` (by hand, or via `--pr`) goes back to the base branch. A
+  run that stopped early stays on its branch too, where the unfinished work is.
 
 - **One issue at a time.** Each issue that does **not** depend on those already
   implemented starts with a clean conversation. Which issue is independent is
@@ -209,7 +210,7 @@ it returns to the run branch before continuing.
 ## Between the run and the pull request — review
 
 Once every issue is `done`, the branch is there to be reviewed before the
-single pull request opens. A finding from that review is **not** a reason to
+single pull request opens, and the driver has left it checked out for that. A finding from that review is **not** a reason to
 run this command again over the same issue list — a finished run's state
 refuses that outright, since it would silently forget which issues are already
 done. It is `/issue-pilot:fix <what you found>` instead: it records the
@@ -223,8 +224,10 @@ up; `/issue-pilot:pr` comes after, once there is nothing left to fix.
 Only if **every** issue in the list is implemented and green
 (`/issue-pilot:status` with no `blocked` and everything `done`). Run it
 with `/issue-pilot:pr`, or pass `--pr` to the driver to have it done at
-the end of the run. Either way the repository is left on the base branch
-afterwards, with the work on the pushed run branch.
+the end of the run. Until then the repository stays on the run branch; opening the pull request is
+what puts it back on the base branch (with `--pr`, the driver only does so once
+the pull request is recorded in the state, so a failed one leaves you on the
+work), with the work on the pushed run branch.
 
 ## Rules
 

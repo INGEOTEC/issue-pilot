@@ -601,14 +601,19 @@ else
   echo "all issues implemented; open the pull request with: /issue-pilot:pr"
 fi
 
-# ------------------------------------------------------------ hand the tree back
-# The run is over and its work is on the run branch.  What stays checked out is
-# the branch everything starts from, not the last thing the driver touched: a
-# repository left on issues-165-166 looks, a week later, like somebody is still
-# working there.  A run that stopped early is different -- its branch is where
-# the unfinished work is, and that is what should be in front of whoever comes
-# to look at it.
-leave_on_base() {
+# ------------------------------------------------------------ where the tree is left
+# The run is over and its work is on the run branch.  The next step is reviewing
+# that work, and the run branch is where that happens, so it stays checked out:
+# going back to the base branch here only meant a `git checkout` at the start of
+# every review.  (A run that stopped early never gets here, and is on its branch
+# for the same reason.)
+#
+# The one way back to the base branch is the pull request: once it is opened the
+# work is on the remote and the review is over.  That is decided from the
+# `pull_request` the pr session records in the state, not from whichever branch
+# that session left checked out -- so a pr session that failed leaves you on the
+# work.
+return_to_base() {
   [[ -n "${BASE:-}" ]] || return 0
   if git show-ref --verify --quiet "refs/heads/$BASE"; then
     git checkout --quiet "$BASE" || {
@@ -621,6 +626,18 @@ leave_on_base() {
       return 0
     }
   fi
-  echo "back on $BASE; the work is on branch $BRANCH"
+  echo "pull request opened; back on $BASE, the work is on branch $BRANCH"
 }
-leave_on_base
+
+pull_request_recorded() {
+  python3 "$STATE" show | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("pull_request") else 1)'
+}
+
+if [[ $OPEN_PR -eq 1 ]] && pull_request_recorded; then
+  return_to_base
+else
+  if [[ $OPEN_PR -eq 1 ]]; then
+    echo "no pull request was recorded; open it with /issue-pilot:pr" >&2
+  fi
+  echo "the work is on branch $BRANCH, checked out for review; /issue-pilot:pr opens the pull request and returns to ${BASE:-the base branch}"
+fi
