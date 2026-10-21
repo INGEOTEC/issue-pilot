@@ -118,12 +118,39 @@ is now `pending` and leaves the run branch checked out when done. `--detach` put
 in a session of its own, exactly as `/issue-pilot:run` does, and returns at
 once with the log path.
 
+### Wait for it, unless `watch` is off
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get watch
+```
+
+If that prints `True` (the default), start this with the Bash tool and
+`run_in_background: true`, right after `--fix --detach` has returned:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" wait
+```
+
+It looks at the driver once a minute and exits when the driver has stopped,
+after sending a desktop notification where the machine can show one, printing
+the full report. The harness wakes this conversation up when it exits.
+
+If it prints `False`, do not start it: the way to follow the fix is
+`/issue-pilot:status`.
+
 ## 6. Report
 
 Tell the user: the fix's id, which issues it names (or that it names none and
 will start from a clean conversation), the defaults you decided in step 3, and
 the driver's log path. Point them at `/issue-pilot:status` to follow it and say
-that `/issue-pilot:pr` is the step after every fix is applied.
+that `/issue-pilot:pr` is the step after every fix is applied. When the wait was
+started, say that this conversation will be told when the driver stops, and that
+`"watch": false` in `.issue-pilot.json` (or `ISSUE_PILOT_WATCH=0`) turns that
+off.
 
 Do not implement the fix yourself, do not check the run branch out, and do not
-touch anything else in the repository.
+touch anything else in the repository. The background `wait` costs no turns
+until it exits, so it is not polling; do not read its output in the meantime.
+When it exits, its output is the full report of `/issue-pilot:status`:
+summarise it by the `report     : full` rules of `commands/status.md` — whether
+the fix is done or blocked and why, and the next step — without acting on it.

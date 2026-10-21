@@ -250,6 +250,16 @@ it was started from. You get the branch and a log path back immediately, and
 follow it with `/issue-pilot:status`. Started from a terminal instead, the
 driver can conduct the interview itself; that is the only path that needs a TTY.
 
+**The conversation is told when the run stops.** Right after detaching,
+`/issue-pilot:run` and `/issue-pilot:fix` start `issues_state.py wait` as a
+background command. It checks once a minute whether the driver is still alive
+and costs no model turns while it is; when the driver stops, it sends a desktop
+notification (`notify-send`, or `osascript` on macOS, when either is there) and
+the conversation is woken up once, with the full report, to say what finished or
+what blocked. If the conversation is closed first, the wait dies with it, which
+is harmless: `/issue-pilot:status` still answers. Set `"watch": false` in
+`.issue-pilot.json`, or `ISSUE_PILOT_WATCH=0`, to turn it off.
+
 **Conversations are addressed by id.** Dependent issues and retries go back to
 the run's own conversation, recorded in the state — never to "the most recent
 conversation in this directory", which during a run is whichever one you opened
@@ -437,6 +447,7 @@ Every setting can be overridden for a single run by an environment variable
 | `max_attempts` | `3` | Attempts on one issue before the run stops. |
 | `pr_draft` | `false` | Open the final pull request as a draft. |
 | `issue_labels` | `[]` | Labels applied to issues opened by `/issue-pilot:plan`. |
+| `watch` | `true` | After `/issue-pilot:run` and `/issue-pilot:fix` detach the driver, wait in the background and tell the conversation when it stops. `false` turns it off. |
 
 `ISSUE_PILOT_HOME` (default `~/.claude/issue-pilot`) is where state and logs live.
 
@@ -446,10 +457,10 @@ Every setting can be overridden for a single run by an environment variable
 |---|---|
 | `/issue-pilot:init` | Configures issue-pilot for this repository and opens the pull request that lands it. Run it once, before anything else. |
 | `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
-| `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background. |
+| `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background and tells the conversation when it stops (`"watch": false` turns that off). |
 | `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
-| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch. |
+| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
 | `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
 | `/issue-pilot:one <n>` | One issue. Called by the driver; you rarely run it yourself. |

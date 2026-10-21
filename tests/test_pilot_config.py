@@ -44,6 +44,18 @@ class Configuration(PilotTestCase):
         self.assertEqual(self.get("issue_labels",
                                   env={"ISSUE_PILOT_ISSUE_LABELS": "a, b"}), "a,b")
 
+    def test_watch_is_on_by_default(self):
+        self.assertEqual(self.get("watch"), "True")
+
+    def test_watch_can_be_turned_off_by_the_project_file(self):
+        self.write_config({"watch": False})
+        self.assertEqual(self.get("watch"), "False")
+
+    def test_watch_can_be_turned_off_by_the_environment(self):
+        self.assertEqual(self.get("watch", env={"ISSUE_PILOT_WATCH": "0"}), "False")
+        self.write_config({"watch": True})
+        self.assertEqual(self.get("watch", env={"ISSUE_PILOT_WATCH": "0"}), "False")
+
     def test_an_unknown_setting_is_rejected(self):
         out = self.run_script("pilot_config.py", "get", "nonsense", check=False)
         self.assertNotEqual(out.returncode, 0)

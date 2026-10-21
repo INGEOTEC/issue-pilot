@@ -51,6 +51,7 @@ DEFAULTS = {
     "max_attempts": (3, "Attempts on one issue before the run stops."),
     "pr_draft": (False, "Open the final pull request as a draft."),
     "issue_labels": ([], "Labels applied to issues opened by /issue-pilot:plan."),
+    "watch": (True, "After /issue-pilot:run and /issue-pilot:fix detach the driver, wait in the background and report when it stops."),
 }
 
 # Where run state and logs live.  Not part of the per-repo config: it is a

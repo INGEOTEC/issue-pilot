@@ -363,6 +363,17 @@ class QuickHelpers(PilotTestCase):
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / "usage-guard.log").write_text("\n".join(lines) + "\n")
 
+    def lib_with_marking_guard(self):
+        """A copy of the plugin whose usage-guard.sh leaves a marker when run."""
+        lib = pathlib.Path(self.tmp.name) / "lib"
+        shutil.copytree(SCRIPTS, lib / "scripts")
+        (lib / "hooks").mkdir()
+        self.marker = pathlib.Path(self.tmp.name) / "guard-ran"
+        guard = lib / "hooks" / "usage-guard.sh"
+        guard.write_text(f"#!/bin/sh\ntouch '{self.marker}'\necho GUARD-CHECK-OUTPUT\n")
+        guard.chmod(0o755)
+        return lib
+
 
 class Quick(QuickHelpers):
     """`quick`: the answer `/issue-pilot:status` gives while the driver runs."""
@@ -434,17 +445,6 @@ class Quick(QuickHelpers):
 
 class Report(QuickHelpers):
     """`report`: the one command `/issue-pilot:status` runs; it chooses."""
-
-    def lib_with_marking_guard(self):
-        """A copy of the plugin whose usage-guard.sh leaves a marker when run."""
-        lib = pathlib.Path(self.tmp.name) / "lib"
-        shutil.copytree(SCRIPTS, lib / "scripts")
-        (lib / "hooks").mkdir()
-        self.marker = pathlib.Path(self.tmp.name) / "guard-ran"
-        guard = lib / "hooks" / "usage-guard.sh"
-        guard.write_text(f"#!/bin/sh\ntouch '{self.marker}'\necho GUARD-CHECK-OUTPUT\n")
-        guard.chmod(0o755)
-        return lib
 
     def report(self, lib=None):
         script = (lib / "scripts" if lib else SCRIPTS) / "issues_state.py"
@@ -540,6 +540,183 @@ class Report(QuickHelpers):
         self.assertIn("issues_state.py\" report", text)
         self.assertNotIn("--check", text)
         self.assertNotIn("if the driver", text.lower())
+
+
+class Wait(QuickHelpers):
+    """`wait`: block while the detached driver lives, then notify and report."""
+
+    def setUp(self):
+        super().setUp()
+        self.lib = self.lib_with_marking_guard()
+        self.notify_log = pathlib.Path(self.env["FAKE_NOTIFY_LOG"])
+
+    def start_wait(self, env=None):
+        return subprocess.Popen(
+            [sys.executable, str(self.lib / "scripts" / "issues_state.py"),
+             "wait", "--interval", "0.1"], cwd=self.repo, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**self.env, **(env or {})})
+
+    def wait_cmd(self, env=None):
+        proc = self.start_wait(env)
+        out, err = proc.communicate(timeout=30)
+        return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+    def dead_pid(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        return proc.pid
+
+    def notifications(self):
+        if not self.notify_log.exists():
+            return []
+        return self.notify_log.read_text().splitlines()
+
+    def test_a_dead_driver_returns_promptly_with_the_full_report(self):
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        (self.log_dir() / "driver.log").write_text("one\nDRIVER-TAIL\n")
+        out = self.wait_cmd()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(out.stdout.startswith("report     : full\n"))
+        for part in ("repository :", "--- usage ---", "GUARD-CHECK-OUTPUT",
+                     "--- driver.log", "DRIVER-TAIL"):
+            self.assertIn(part, out.stdout)
+
+    def test_the_report_is_the_one_report_prints_for_a_stopped_driver(self):
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        (self.log_dir() / "driver.log").write_text("DRIVER-TAIL\n")
+        report = subprocess.run(
+            [sys.executable, str(self.lib / "scripts" / "issues_state.py"), "report"],
+            cwd=self.repo, capture_output=True, text=True, env=self.env)
+        self.assertEqual(self.wait_cmd().stdout, report.stdout)
+
+    def test_a_live_driver_keeps_it_waiting_until_the_driver_exits(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        (self.log_dir() / "driver.pid").write_text(f"{child.pid}\n")
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait(timeout=1)
+        self.assertEqual(self.notifications(), [])
+        child.kill()
+        child.wait()  # reaped: an unreaped zombie still answers kill(pid, 0)
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertTrue(out.startswith("report     : full\n"))
+        self.assertEqual(len(self.notifications()), 1)
+
+    def test_a_new_pid_written_while_waiting_is_the_one_that_counts(self):
+        first = subprocess.Popen(["sleep", "60"])
+        second = subprocess.Popen(["sleep", "60"])
+        for child in (first, second):
+            self.addCleanup(lambda c=child: (c.poll() is None and c.kill(), c.wait()))
+        (self.log_dir() / "driver.pid").write_text(f"{first.pid}\n")
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        (self.log_dir() / "driver.pid").write_text(f"{second.pid}\n")
+        first.kill()
+        first.wait()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait(timeout=1)
+        second.kill()
+        second.wait()
+        proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0)
+
+    def test_no_driver_pid_returns_at_once_and_says_so(self):
+        out = self.wait_cmd()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("no detached driver", out.stdout.splitlines()[0])
+        self.assertIn("report     : full", out.stdout)
+        self.assertIn("--- usage ---", out.stdout)
+        self.assertEqual(self.notifications(), [])
+
+    def test_the_notification_says_the_run_finished(self):
+        for n in ("1", "2", "3"):
+            self.run_script("issues_state.py", "done", n)
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        self.wait_cmd()
+        (call,) = self.notifications()
+        self.assertIn("issues-1-2-3", call)
+        self.assertIn("Finished", call)
+
+    def test_the_notification_says_what_is_pending(self):
+        self.run_script("issues_state.py", "done", "1")
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        self.wait_cmd()
+        (call,) = self.notifications()
+        self.assertIn("pending", call)
+        self.assertIn("#2", call)
+
+    def test_the_notification_names_the_blocked_item(self):
+        self.run_script("issues_state.py", "done", "1")
+        self.run_script("issues_state.py", "block", "2", "--reason", "tests are red")
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        self.wait_cmd()
+        (call,) = self.notifications()
+        self.assertIn("Blocked on #2", call)
+        self.assertIn("tests are red", call)
+
+    def test_a_failing_notify_send_changes_nothing(self):
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        good = self.wait_cmd()
+        failing = self.wait_cmd(env={"FAKE_NOTIFY_EXIT": "1"})
+        self.assertEqual(failing.returncode, 0, failing.stderr)
+        self.assertEqual(failing.stdout, good.stdout)
+        self.assertEqual(len(self.notifications()), 2)
+
+    def test_a_missing_notify_send_changes_nothing(self):
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        # A PATH with only the tools the script needs, and no notify-send.
+        bare = pathlib.Path(self.tmp.name) / "bare-bin"
+        bare.mkdir()
+        for tool in ("git", "true", "sh"):
+            (bare / tool).symlink_to(shutil.which(tool))
+        out = self.wait_cmd(env={"PATH": str(bare)})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(out.stdout.startswith("report     : full\n"))
+        self.assertEqual(self.notifications(), [])
+
+    def test_a_hung_notify_send_does_not_hang_wait(self):
+        (self.log_dir() / "driver.pid").write_text(f"{self.dead_pid()}\n")
+        slow = pathlib.Path(self.tmp.name) / "slow-bin"
+        slow.mkdir()
+        (slow / "notify-send").write_text("#!/bin/sh\nsleep 60\n")
+        (slow / "notify-send").chmod(0o755)
+        script = self.lib / "scripts" / "issues_state.py"
+        code = ("import sys; sys.path.insert(0, %r); import issues_state; "
+                "issues_state.NOTIFY_TIMEOUT = 0.5; "
+                "issues_state.notify('t', 'm'); print('returned')"
+                % str(self.lib / "scripts"))
+        out = subprocess.run([sys.executable, "-c", code], cwd=self.repo,
+                             capture_output=True, text=True, timeout=30,
+                             env={**self.env, "PATH": f"{slow}{os.pathsep}{self.env['PATH']}"})
+        self.assertIn("returned", out.stdout, out.stderr)
+        self.assertTrue(script.exists())
+
+    def test_without_a_run_it_fails_as_status_does(self):
+        shutil.rmtree(self.home / "state")
+        out = self.wait_cmd()
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("no run in progress", out.stderr)
+
+
+class WatchInTheCommands(unittest.TestCase):
+    """run.md and fix.md are the only instructions that start `wait`."""
+
+    def text(self, name):
+        return (SCRIPTS.parent / "commands" / name).read_text()
+
+    def test_run_and_fix_start_wait_in_the_background_when_watch_is_on(self):
+        for name in ("run.md", "fix.md"):
+            text = self.text(name)
+            for needle in ('pilot_config.py" get watch',
+                           'issues_state.py" wait', "run_in_background"):
+                self.assertTrue(needle in text, f"{name} lacks {needle}")
+
+    def test_status_md_never_waits(self):
+        self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))
 
 
 if __name__ == "__main__":
