@@ -14,10 +14,10 @@ Close the issue-pilot run by opening **one single** pull request.
    If any issue is not `done`, or `blocked` is not null, **do not open a pull
    request**: report the state and stop.
 
-   The driver leaves the repository on the base branch when it finishes, so the
-   work is probably not checked out. Get onto the run branch (`branch` in the
-   state) — the tree has to be clean first; if it is not, stop and say what is
-   in the way:
+   The driver leaves the run branch checked out when it finishes, so the work is
+   normally there already. Make sure of it: get onto the run branch (`branch` in
+   the state) if the repository is anywhere else — the tree has to be clean
+   first; if it is not, stop and say what is in the way:
 
    ```bash
    git status --porcelain
