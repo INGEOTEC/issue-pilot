@@ -6,6 +6,23 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-21
+
+### Added
+
+- `issues_state.py wait`: blocks while the detached driver is alive, polling
+  `driver.pid` every `--interval` seconds (60 by default), and when it stops
+  sends a best-effort desktop notification (`notify-send`, or `osascript` on
+  macOS) saying whether the run finished, is blocked or has items pending, then
+  prints the same full report as `report`. With no `driver.pid` it says there is
+  no detached driver and prints the report at once.
+- `/issue-pilot:run` and `/issue-pilot:fix` start that wait as a background
+  command right after `--detach`, so the conversation is woken up once, when the
+  run stops, and summarises it. It costs no model turns while the run goes,
+  unlike polling with `/loop`.
+- The `watch` setting (default `true`; `ISSUE_PILOT_WATCH=0` or
+  `"watch": false` turns it off) controls that automatic wait.
+
 ## [0.5.0] - 2026-10-20
 
 ### Changed

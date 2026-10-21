@@ -123,14 +123,46 @@ base branch comes from `.issue-pilot.json` or from the repository's default
 branch on GitHub; do not guess it yourself, and do not pass `--from-head`
 unless the user explicitly asks to start from the local checkout.
 
+### Wait for it, unless `watch` is off
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get watch
+```
+
+If that prints `True` (the default), start this with the Bash tool and
+`run_in_background: true`, right after `--detach` has returned:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" wait
+```
+
+It looks at the driver once a minute and exits when the driver has stopped,
+after sending a desktop notification where the machine can show one, printing
+the full report. The harness wakes this conversation up when it exits.
+
+If it prints `False`, do not start it: the user turned the wait off, and the way
+to follow the run is `/issue-pilot:status`.
+
 ## 6. Report
 
 Tell the user, briefly: the branch, the driver's log path, the questions you
 decided yourself and with what defaults, and that the run is now in the
-background. Point them at `/issue-pilot:status` to follow it.
+background. Point them at `/issue-pilot:status` to follow it. When the wait was
+started, say that this conversation will be told when the run stops, and that
+`"watch": false` in `.issue-pilot.json` (or `ISSUE_PILOT_WATCH=0`) turns that
+off.
 
 Do not tail the log waiting for the run to finish, and do not start implementing
-anything yourself.
+anything yourself. The background `wait` is not tailing: it costs no turns
+until it exits, which is exactly why it is allowed and polling is not. Do not
+read its output in the meantime, and do not poll for it.
+
+When it exits, the output is the full report of `/issue-pilot:status`: summarise
+it by the `report     : full` rules of `commands/status.md` — what is done or
+blocked and why (from the log tails: the actual error), and the next step
+(`issues_run.sh --resume --detach` for a blocked item, `/issue-pilot:fix` or
+`/issue-pilot:pr` once every issue is done). Do not act on that next step
+yourself. If it says there is no detached driver, say so and stop.
 
 ## What the driver does, so you can read its log
 

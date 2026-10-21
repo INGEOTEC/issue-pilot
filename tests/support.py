@@ -54,6 +54,9 @@ class PilotTestCase(unittest.TestCase):
         self.bindir.mkdir()
         self.install_stub("gh")
         self.install_stub("claude")
+        # Always present, so no test can pop a real desktop notification on the
+        # developer's machine through `issues_state.py wait`.
+        self.install_stub("notify-send")
 
         self.issues_file = root / "issues.json"
         self.write_issues(self.issues)
@@ -68,6 +71,7 @@ class PilotTestCase(unittest.TestCase):
             "FAKE_GH_PR_LOG": str(root / "gh-pr.jsonl"),
             "FAKE_CLAUDE_LOG": str(self.claude_log),
             "FAKE_CLAUDE_COUNTER": str(root / "claude-counter"),
+            "FAKE_NOTIFY_LOG": str(root / "notify-send.log"),
             "FAKE_CLAUDE_STATE": str(SCRIPTS / "issues_state.py"),
             "CLAUDE_CODE_OAUTH_TOKEN": "test-token",
             "ISSUE_PILOT_HOME": str(self.home),

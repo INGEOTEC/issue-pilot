@@ -39,6 +39,14 @@ Subcommands
         `report     : quick` followed by `quick`; otherwise `report     : full`
         followed by `status`, the usage guard's --check, and the tails of
         driver.log and of the latest session log.
+  wait [--interval SECONDS]
+        Blocks while the detached driver is alive, looking at driver.pid every
+        SECONDS (60 by default), then sends a best-effort desktop notification
+        and prints the full report.  /issue-pilot:run and /issue-pilot:fix run
+        it as a background command, so the conversation that started the run is
+        woken up once, when the run stops, at no cost in model turns while it
+        goes.  With no driver.pid there is nothing to wait for: it says so and
+        prints the full report at once.
   path  Prints the state file for this repository.
 
 Where `<id>` appears, it is either an issue number or a review fix id
@@ -51,8 +59,10 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -507,15 +517,8 @@ def guard_check():
     return text or "usage check printed nothing"
 
 
-def cmd_report(args):
-    """What `/issue-pilot:status` shows: the quick answer while the driver is
-    running, otherwise the full report.  The choice is made here, in code."""
-    state = load()
-    running = driver(state)
-    if running and running[1]:
-        print("report     : quick")
-        cmd_quick(args)
-        return
+def print_full_report(state, args):
+    """The report for a run that is not going: status, usage, and log tails."""
     print("report     : full")
     print()
     cmd_status(args)
@@ -531,6 +534,75 @@ def cmd_report(args):
         print()
         print(f"--- {latest.name} ({latest}) ---")
         print("\n".join(tail_lines(latest)) or "(empty)")
+
+
+def cmd_report(args):
+    """What `/issue-pilot:status` shows: the quick answer while the driver is
+    running, otherwise the full report.  The choice is made here, in code."""
+    state = load()
+    running = driver(state)
+    if running and running[1]:
+        print("report     : quick")
+        cmd_quick(args)
+        return
+    print_full_report(state, args)
+
+
+NOTIFY_TIMEOUT = 10
+
+
+def notify(title, message):
+    """A desktop notification, if this machine has a way to show one.
+
+    Best effort and nothing more: a missing tool, a failing one or a hung one
+    must never change what `wait` prints or its exit status, because the report
+    that follows is the part that matters.
+    """
+    if shutil.which("notify-send"):
+        cmd = ["notify-send", title, message]
+    elif sys.platform == "darwin" and shutil.which("osascript"):
+        # The text goes in as arguments, so quotes in it need no escaping.
+        cmd = ["osascript",
+               "-e", "on run argv",
+               "-e", "display notification (item 1 of argv) with title (item 2 of argv)",
+               "-e", "end run", message, title]
+    else:
+        return
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=NOTIFY_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def stop_message(state):
+    """One line on why the driver stopped, read from the state."""
+    blocked = state.get("blocked")
+    if blocked:
+        return (f"Blocked on {label(blocked['issue'])}: "
+                f"{blocked.get('reason') or 'no reason recorded'}")
+    pending = [n for n, v in state["status"].items() if v == "pending"]
+    if pending:
+        return f"Stopped with {', '.join(label(n) for n in pending)} still pending"
+    return "Finished: every issue is done"
+
+
+def cmd_wait(args):
+    """Block until the detached driver has stopped, then say so and report."""
+    state = load()
+    running = driver(state)
+    if running is None:
+        print("no detached driver to wait for (no driver.pid for this run)")
+        print()
+        print_full_report(state, args)
+        return
+    # The pid is read again on every pass: `--resume` and `--fix` start a new
+    # driver, which writes a new pid, and the one that matters is the latest.
+    while running and running[1]:
+        time.sleep(args.interval)
+        running = driver(state)
+    state = load()
+    notify(f"issue-pilot: {state.get('branch') or 'run'}", stop_message(state))
+    print_full_report(state, args)
 
 
 def main():
@@ -586,6 +658,10 @@ def main():
     sub.add_parser("status").set_defaults(func=cmd_status)
     sub.add_parser("quick").set_defaults(func=cmd_quick)
     sub.add_parser("report").set_defaults(func=cmd_report)
+    p = sub.add_parser("wait")
+    p.add_argument("--interval", type=float, default=60,
+                   help="seconds between looks at driver.pid (default 60)")
+    p.set_defaults(func=cmd_wait)
     sub.add_parser("path").set_defaults(func=lambda a: print(state_path()))
 
     args = ap.parse_args()

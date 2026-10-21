@@ -1,0 +1,6 @@
+#!/bin/sh
+# notify-send for the tests: records its argv, one call per line, to
+# $FAKE_NOTIFY_LOG and exits with $FAKE_NOTIFY_EXIT (0 by default).  It never
+# shows anything, so no test pops a real desktop notification.
+[ -n "$FAKE_NOTIFY_LOG" ] && echo "$*" >> "$FAKE_NOTIFY_LOG"
+exit "${FAKE_NOTIFY_EXIT:-0}"

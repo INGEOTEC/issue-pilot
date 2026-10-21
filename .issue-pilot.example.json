@@ -6,5 +6,6 @@
   "effort": "high",
   "max_attempts": 3,
   "pr_draft": false,
-  "issue_labels": ["automated"]
+  "issue_labels": ["automated"],
+  "watch": true
 }
