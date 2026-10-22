@@ -115,8 +115,12 @@ something, so re-read the message and go back rather than retrying blindly.
 `--fix` continues the run recorded in the state: no questions, no
 re-initialisation, no unblocking of anything else — it applies the one fix that
 is now `pending` and leaves the run branch checked out when done. `--detach` puts it
-in a session of its own, exactly as `/issue-pilot:run` does, and returns at
-once with the log path.
+in a session of its own, exactly as `/issue-pilot:run` does, and returns with the
+log path once the driver has rewritten the state for this run.
+
+If it exits non-zero, the driver died before getting that far: report the error
+it printed to the user and stop, and do **not** start the background `wait`
+below.
 
 ### Wait for it, unless `watch` is off
 
@@ -133,7 +137,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" wait
 
 It looks at the driver once a minute and exits when the driver has stopped,
 after sending a desktop notification where the machine can show one, printing
-the full report. The harness wakes this conversation up when it exits.
+the full report. The harness wakes this conversation up when it exits. If it
+exits 1 saying the driver stopped before initialising the run, report that
+error and the log tail it printed.
 
 If it prints `False`, do not start it: the way to follow the fix is
 `/issue-pilot:status`.

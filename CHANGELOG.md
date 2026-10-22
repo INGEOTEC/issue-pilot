@@ -6,6 +6,41 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-22
+
+### Fixed
+
+- `issues_state.py wait`, `quick`, `report` and `/issue-pilot:status` right
+  after `--detach` described the **previous** run of the repository: the child
+  driver only rewrites the per-repository state file after syncing the base
+  branch and cutting the run branch, so for those seconds the state still named
+  the old run, whose driver was long dead. `wait` returned at once with that
+  run's full report.
+- `--detach` printed `run started` even when the child died before initialising
+  the run (an unreachable origin, say). It now exits non-zero with the error and
+  the tail of `driver.log`.
+- `issues_run.sh --resume --detach` was refused with "nobody to ask phase 1's
+  questions" although `--resume` never runs phase 1; `--resume` now implies no
+  interview, as `--fix` already did.
+- `commands/run.md` says the notes are written with the Write tool in one step,
+  not through a shell chain where an earlier command's exit status can skip the
+  write silently.
+
+### Added
+
+- `--detach` returns once the state names the run branch and has been rewritten
+  since launch (`init`, or `engine` for `--resume`/`--fix`). It gives up waiting
+  after `ISSUE_PILOT_DETACH_TIMEOUT` seconds (default 120, `0` to not wait),
+  says the driver is still starting and exits 0.
+- A driver pointer per repository, `state/issues-driver-<slug>.json` (branch,
+  pid, log, start time), written by `--detach` through
+  `issues_state.py driver-pointer`. `wait`, `quick` and `report` resolve the
+  driver from it; `quick` says `starting <branch>` until the run is initialised,
+  and `wait` exits 1 with the log tail if the driver dies first. Without a
+  pointer they behave as before.
+- `run.md` and `fix.md`: a non-zero `--detach` is reported and the background
+  `wait` is not started.
+
 ## [0.5.1] - 2026-10-21
 
 ### Added

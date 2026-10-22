@@ -46,7 +46,18 @@ Subcommands
         it as a background command, so the conversation that started the run is
         woken up once, when the run stops, at no cost in model turns while it
         goes.  With no driver.pid there is nothing to wait for: it says so and
-        prints the full report at once.
+        prints the full report at once.  If the driver stops without the state ever
+        naming its branch (it died before initialising the run) it says so, prints
+        the tail of that driver's log, notifies, and exits 1.
+  driver-pointer [--branch B --pid N --log PATH]
+        `issues_run.sh --detach` records which driver it launched (branch, pid,
+        log, start time) in `state/issues-driver-<slug>.json`, next to the state
+        file, with all three options.  With none it prints the pointer as JSON,
+        and exits 1 when there is none.  `quick`, `report` and `wait` resolve
+        the driver from it rather than from the branch the state names, which
+        until the child has initialised its run is still the previous run's.
+        Without a pointer (a run detached by an older version) they look at
+        `logs/<state branch>/driver.pid` as they always did.
   path  Prints the state file for this repository.
 
 Where `<id>` appears, it is either an issue number or a review fix id
@@ -104,26 +115,67 @@ def now():
         microsecond=0).isoformat()
 
 
-def state_path(root=None):
+def repo_slug(root=None):
     root = root or pilot_config.repo_root()
-    slug = root.strip("/").replace("/", "-")
-    return pilot_config.state_dir() / f"issues-run-{slug}.json"
+    return root.strip("/").replace("/", "-")
+
+
+def state_path(root=None):
+    return pilot_config.state_dir() / f"issues-run-{repo_slug(root)}.json"
+
+
+def driver_pointer_path(root=None):
+    """Next to the state file: which driver was launched last, by whom."""
+    return pilot_config.state_dir() / f"issues-driver-{repo_slug(root)}.json"
+
+
+def branch_log_dir(branch):
+    return pilot_config.home() / "logs" / (branch or "run")
 
 
 def log_dir(state):
-    d = pilot_config.home() / "logs" / (state.get("branch") or "run")
+    d = branch_log_dir(state.get("branch"))
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def write_driver_pointer(branch, pid, log):
+    pointer = {"branch": branch, "pid": pid, "log": str(log),
+               "started_at": now()}
+    driver_pointer_path().write_text(json.dumps(pointer, indent=2))
+    return pointer
+
+
+def read_driver_pointer():
+    """The pointer `--detach` left, or None when missing or unreadable."""
+    try:
+        pointer = json.loads(driver_pointer_path().read_text())
+    except (OSError, ValueError):
+        return None
+    return pointer if isinstance(pointer, dict) and pointer.get("branch") else None
+
+
 def driver(state):
-    """(pid, running) for a detached run, or None if it was never detached.
+    """(pid, running, branch) for a detached run, or None if never detached.
+
+    The driver is the one the pointer names when there is a pointer -- the state
+    file only describes a run once the child has initialised it, and until then
+    it still describes the previous one.  Without a pointer (a run detached by an
+    older version) it is the driver of the branch the state names.  Either way
+    the pid is read again from that branch's `driver.pid` on every call, because
+    `--resume` and `--fix` start a new driver with a new pid.
 
     `os.kill(pid, 0)` is the portable way to ask; a recycled pid can make this
     say "running" about somebody else's process, which is a good deal better
     than the alternative of not reporting it at all.
     """
-    pid_file = log_dir(state) / "driver.pid"
+    pointer = read_driver_pointer()
+    if pointer:
+        branch = pointer["branch"]
+        pid_file = branch_log_dir(branch) / "driver.pid"
+    else:
+        branch = state.get("branch")
+        pid_file = log_dir(state) / "driver.pid"
     if not pid_file.exists():
         return None
     try:
@@ -133,10 +185,10 @@ def driver(state):
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
-        return pid, False
+        return pid, False, branch
     except PermissionError:
-        return pid, True
-    return pid, True
+        return pid, True, branch
+    return pid, True, branch
 
 
 GUARD_TAIL_BYTES = 64 * 1024
@@ -417,9 +469,11 @@ def cmd_status(args):
     print(f"started    : {state.get('created_at', '?')}")
     running = driver(state)
     if running:
-        pid, alive = running
-        print(f"driver     : {'running' if alive else 'not running'} (pid {pid}), "
-              f"log {log_dir(state) / 'driver.log'}")
+        pid, alive, drv_branch = running
+        line = f"driver     : {'running' if alive else 'not running'} (pid {pid})"
+        if drv_branch != state.get("branch"):
+            line += f" for {drv_branch}, which never initialised its run"
+        print(f"{line}, log {branch_log_dir(drv_branch) / 'driver.log'}")
     print()
     for item in state["plan"]:
         n = str(item["issue"])
@@ -467,7 +521,19 @@ def cmd_quick(args):
     if running is None:
         print("driver     : not detached")
     else:
-        pid, alive = running
+        pid, alive, drv_branch = running
+        if drv_branch != state.get("branch"):
+            # The state still describes another run: this driver has not got
+            # as far as initialising its own (or died before it could).
+            if alive:
+                print(f"driver     : starting {drv_branch} (pid {pid})")
+            else:
+                print(f"driver     : not running (pid {pid}), stopped before "
+                      f"initialising {drv_branch}")
+            print("progress   : not initialised yet")
+            print(f"guard      : {guard_state()}")
+            print(f"log        : {branch_log_dir(drv_branch) / 'driver.log'}")
+            return
         print(f"driver     : {'running' if alive else 'not running'} (pid {pid})")
     statuses = state["status"]
     done = sum(1 for v in statuses.values() if v == "done")
@@ -601,8 +667,36 @@ def cmd_wait(args):
         time.sleep(args.interval)
         running = driver(state)
     state = load()
+    if running and running[2] != state.get("branch"):
+        # The driver is gone and the state never came to describe its run: it
+        # died between being launched and initialising it (base sync failed,
+        # say).  The state in front of us belongs to a previous run, so its
+        # report would be a different run's.
+        pid, _, branch = running
+        message = (f"driver for {branch} stopped before initialising the run "
+                   f"(pid {pid}); the state still describes {state.get('branch')}")
+        notify(f"issue-pilot: {branch}", message)
+        driver_log = branch_log_dir(branch) / "driver.log"
+        print(message)
+        print()
+        print(f"--- driver.log ({driver_log}) ---")
+        print("\n".join(tail_lines(driver_log)) or "(empty or missing)")
+        sys.exit(1)
     notify(f"issue-pilot: {state.get('branch') or 'run'}", stop_message(state))
     print_full_report(state, args)
+
+
+def cmd_driver_pointer(args):
+    if args.branch is None and args.pid is None and args.log is None:
+        pointer = read_driver_pointer()
+        if pointer is None:
+            print(f"no driver pointer ({driver_pointer_path()})", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(pointer, indent=2))
+        return
+    if args.branch is None or args.pid is None or args.log is None:
+        sys.exit("driver-pointer: --branch, --pid and --log go together")
+    print(json.dumps(write_driver_pointer(args.branch, args.pid, args.log), indent=2))
 
 
 def main():
@@ -662,6 +756,11 @@ def main():
     p.add_argument("--interval", type=float, default=60,
                    help="seconds between looks at driver.pid (default 60)")
     p.set_defaults(func=cmd_wait)
+    p = sub.add_parser("driver-pointer")
+    p.add_argument("--branch")
+    p.add_argument("--pid", type=int)
+    p.add_argument("--log")
+    p.set_defaults(func=cmd_driver_pointer)
     sub.add_parser("path").set_defaults(func=lambda a: print(state_path()))
 
     args = ap.parse_args()
