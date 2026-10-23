@@ -246,8 +246,14 @@ issues.
 
 **The run itself is detached.** It is started with `--detach`, in a session of
 its own, so it outlives both the tool call that started it and the conversation
-it was started from. You get the branch and a log path back immediately, and
-follow it with `/issue-pilot:status`. Started from a terminal instead, the
+it was started from. It returns once the driver has initialised the run (the
+state file is this run's, so a `wait` or a status started right after cannot
+read the previous run's) and fails, with the tail of the log, if the driver dies
+first; it stops waiting after `ISSUE_PILOT_DETACH_TIMEOUT` seconds (120 by
+default, `0` to not wait) and says the driver is still starting. You get the
+branch and a log path back, and follow it with `/issue-pilot:status`. The driver
+launched is recorded in `state/issues-driver-<slug>.json`, which is what `wait`,
+`quick` and `report` look at. Started from a terminal instead, the
 driver can conduct the interview itself; that is the only path that needs a TTY.
 
 **The conversation is told when the run stops.** Right after detaching,

@@ -8,10 +8,12 @@ refuses to start.
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import time
 import unittest
 
-from support import PilotTestCase, issue
+from support import SCRIPTS, PilotTestCase, issue
 
 
 class Run(PilotTestCase):
@@ -379,32 +381,108 @@ class Run(PilotTestCase):
         self.assertIn("nobody to ask", out.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_a_detached_run_returns_at_once_and_keeps_going(self):
-        started = time.time()
-        out = self.run_driver("--detach", "--no-interview", "1", "2", check=True)
-        self.assertLess(time.time() - started, 20)
-        self.assertIn("background", out.stdout)
-
-        logdir = self.home / "logs" / "issues-1-2"
-        self.assertTrue((logdir / "driver.pid").exists())
-
-        pid = int((logdir / "driver.pid").read_text().strip())
+    def wait_for_exit(self, pid, logdir, what="the detached run"):
         deadline = time.time() + 60
         while time.time() < deadline:
             try:
                 os.kill(pid, 0)
             except OSError:
-                break
+                return
             time.sleep(0.5)
-        else:
-            self.fail("the detached run never finished:\n" +
-                      (logdir / "driver.log").read_text())
+        self.fail(f"{what} never finished:\n" + (logdir / "driver.log").read_text())
 
-        status = json.loads(
-            self.run_script("issues_state.py", "show", check=False).stdout
-            or "{}").get("status", {})
-        self.assertEqual(status, {"1": "done", "2": "done"})
+    def pointer(self):
+        return json.loads(self.run_script("issues_state.py", "driver-pointer").stdout)
+
+    def test_a_detached_run_returns_once_it_is_initialised_and_keeps_going(self):
+        started = time.time()
+        out = self.run_driver("--detach", "--no-interview", "1", "2", check=True)
+        self.assertLess(time.time() - started, 20)
+        self.assertIn("background", out.stdout)
+        # By the time it returns, the state is this run's and the pointer names it.
+        self.assertEqual(self.state()["branch"], "issues-1-2")
+
+        logdir = self.home / "logs" / "issues-1-2"
+        self.assertTrue((logdir / "driver.pid").exists())
+        pid = int((logdir / "driver.pid").read_text().strip())
+        pointer = self.pointer()
+        self.assertEqual(pointer["branch"], "issues-1-2")
+        self.assertEqual(pointer["pid"], pid)
+        self.assertEqual(pointer["log"], str(logdir / "driver.log"))
+        self.assertIn("started_at", pointer)
+
+        self.wait_for_exit(pid, logdir)
+        self.assertEqual(self.state()["status"], {"1": "done", "2": "done"})
         self.assertIn("/issue-pilot:pr", (logdir / "driver.log").read_text())
+
+    def test_wait_started_after_a_stale_state_reports_the_new_run(self):
+        # A finished run on another branch, its driver long dead.
+        self.run_script("issues_state.py", "init", "3", "--branch", "issues-9")
+        self.run_script("issues_state.py", "done", "3")
+        old = self.home / "logs" / "issues-9"
+        old.mkdir(parents=True)
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        (old / "driver.pid").write_text(f"{dead.pid}\n")
+
+        # Slow enough that the run is still going when we look at it.
+        self.run_driver("--detach", "--no-interview", "1", "2", check=True,
+                        env=self.plan("touch", "touch", "done", "done"))
+        self.assertEqual(self.state()["branch"], "issues-1-2")
+        report = self.run_script("issues_state.py", "report").stdout
+        self.assertNotIn("issues-9", report)
+
+        out = subprocess.run(
+            [sys.executable, str(SCRIPTS / "issues_state.py"), "wait", "--interval", "0.2"],
+            cwd=self.repo, capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("report     : full", out.stdout)
+        self.assertIn("branch     : issues-1-2", out.stdout)
+        self.assertNotIn("issues-9", out.stdout)
+
+    def test_a_stale_state_never_shows_through_right_after_detaching(self):
+        self.run_script("issues_state.py", "init", "3", "--branch", "issues-9")
+        self.run_script("issues_state.py", "done", "3")
+        self.run_driver("--detach", "--no-interview", "1", "2", check=True)
+        # Whether the driver is still going or already done, it is issues-1-2.
+        report = self.run_script("issues_state.py", "report").stdout
+        self.assertIn("issues-1-2", report)
+        self.assertNotIn("issues-9", report)
+
+    def test_a_detach_whose_driver_dies_before_initialising_fails(self):
+        self._git("remote", "set-url", "origin", "/nonexistent")
+        out = self.run_driver("--detach", "--no-interview", "1", "2")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn("run started", out.stdout)
+        self.assertIn("exited before initialising the run", out.stderr)
+        self.assertIn("driver.log", out.stderr)
+        # ...and the tail of the log, which carries the base sync error.
+        self.assertIn("origin", out.stderr.split("last 20 lines")[-1])
+        # The pointer and pid stay, so wait and report describe the failure.
+        self.assertEqual(self.pointer()["branch"], "issues-1-2")
+        self.assertTrue((self.home / "logs" / "issues-1-2" / "driver.pid").exists())
+
+    def test_a_zero_timeout_returns_at_once_and_the_run_still_completes(self):
+        out = self.run_driver("--detach", "--no-interview", "1", "2", check=True,
+                              env={"ISSUE_PILOT_DETACH_TIMEOUT": "0"})
+        logdir = self.home / "logs" / "issues-1-2"
+        self.assertIn("still starting", out.stdout)
+        self.assertIn(str(logdir / "driver.log"), out.stdout)
+        self.assertNotIn("run started", out.stdout)
+        pid = int((logdir / "driver.pid").read_text().strip())
+        self.assertEqual(self.pointer()["pid"], pid)
+        self.wait_for_exit(pid, logdir)
+        self.assertEqual(self.state()["status"], {"1": "done", "2": "done"})
+
+    def test_a_non_detached_run_writes_no_pointer(self):
+        self.run_driver("--no-interview", "1", check=True)
+        self.assertEqual(self.run_script("issues_state.py", "driver-pointer",
+                                         check=False).returncode, 1)
+
+    def test_plan_only_writes_no_pointer(self):
+        self.run_driver("--plan-only", "--detach", "--no-interview", "1", check=True)
+        self.assertEqual(self.run_script("issues_state.py", "driver-pointer",
+                                         check=False).returncode, 1)
 
 
 class FixRuns(Run):
@@ -480,29 +558,35 @@ class FixRuns(Run):
         self.assertEqual(out.returncode, 1)
         self.assertEqual(self.state()["blocked"]["issue"], "fix-1")
 
-    def test_a_detached_fix_returns_at_once_and_keeps_going(self):
+    def test_a_detached_fix_returns_once_the_state_is_rewritten_and_keeps_going(self):
         self.run_driver("--no-interview", "1", check=True)
         self.fix_add()
         self.reset_claude_log()
+        before = self.state()["updated_at"]
 
         started = time.time()
         out = self.run_driver("--fix", "--detach", check=True)
         self.assertLess(time.time() - started, 20)
         self.assertIn("background", out.stdout)
+        # The new driver has rewritten the state (`engine`) by the time we return.
+        self.assertNotEqual(self.state()["updated_at"], before)
 
         logdir = self.home / "logs" / "issues-1"
         pid = int((logdir / "driver.pid").read_text().strip())
-        deadline = time.time() + 60
-        while time.time() < deadline:
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                break
-            time.sleep(0.5)
-        else:
-            self.fail("the detached fix run never finished:\n" +
-                      (logdir / "driver.log").read_text())
+        pointer = self.pointer()
+        self.assertEqual((pointer["branch"], pointer["pid"]), ("issues-1", pid))
+        self.wait_for_exit(pid, logdir, "the detached fix run")
         self.assertEqual(self.state()["status"]["fix-1"], "done")
+
+    def test_a_detached_resume_records_the_pointer_too(self):
+        self.run_driver("--no-interview", "1", "3", env=self.plan("block"))
+        out = self.run_driver("--resume", "--detach", check=True)
+        self.assertIn("background", out.stdout)
+        logdir = self.home / "logs" / "issues-1-3"
+        pid = int((logdir / "driver.pid").read_text().strip())
+        self.assertEqual(self.pointer()["pid"], pid)
+        self.wait_for_exit(pid, logdir, "the detached resumed run")
+        self.assertEqual(self.state()["status"], {"1": "done", "3": "done"})
 
     def test_a_rerun_over_a_finished_run_is_refused(self):
         self.run_driver("--no-interview", "1", check=True)

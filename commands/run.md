@@ -100,10 +100,14 @@ disk, written for a session that never saw this conversation:
 NOTES="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" notes-file $ARGUMENTS)"
 ```
 
-Write to that path: the answers, the defaults you decided, which issue each
-point applies to, what has changed in the code since each issue was planned
-and how the plan is to be read in the light of it, how long the slow steps
-take, and — explicitly — what must **not** be done. Plain text.
+Write to that path with the Write tool, in one step: the answers, the defaults
+you decided, which issue each point applies to, what has changed in the code
+since each issue was planned and how the plan is to be read in the light of it,
+how long the slow steps take, and — explicitly — what must **not** be done.
+Plain text. Do not write it through a shell chain or a heredoc
+(`ls … | grep -c … && cat > "$NOTES" <<'EOF'`): if an unrelated command earlier
+in the chain exits non-zero, the write is skipped silently and the run is
+refused for an empty notes file.
 
 ## 5. Start the run
 
@@ -111,10 +115,19 @@ take, and — explicitly — what must **not** be done. Plain text.
 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_run.sh" --detach --notes-file "$NOTES" $ARGUMENTS
 ```
 
-`--detach` puts the run in a session of its own and returns immediately. It has
-to: a run takes hours, far longer than any tool call, and a run tied to this
+`--detach` puts the run in a session of its own and returns once the driver
+has initialised the run — the state file is now this run's, not the previous
+one's — which takes the seconds the base branch needs to sync. It has to detach:
+a run takes hours, far longer than any tool call, and a run tied to this
 conversation would die with it. The command prints the branch and the driver's
 log path.
+
+It can also fail: if the driver dies before initialising the run (an
+unreachable origin, say) it exits non-zero with the error and the tail of the
+log. Report that error to the user and stop: do **not** start the background
+`wait` below, and do not retry blindly. (`ISSUE_PILOT_DETACH_TIMEOUT` seconds
+past without an answer, 120 by default, it exits 0 saying the driver is still
+starting; the wait below is right then.)
 
 The driver syncs the base branch with origin once more, exactly as step 1 did,
 and cuts the run branch from it right before the first
@@ -138,7 +151,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" wait
 
 It looks at the driver once a minute and exits when the driver has stopped,
 after sending a desktop notification where the machine can show one, printing
-the full report. The harness wakes this conversation up when it exits.
+the full report. The harness wakes this conversation up when it exits. If it
+exits 1 saying the driver stopped before initialising the run, report that
+error and the log tail it printed: the run never started.
 
 If it prints `False`, do not start it: the user turned the wait off, and the way
 to follow the run is `/issue-pilot:status`.

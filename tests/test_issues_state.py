@@ -355,6 +355,11 @@ class QuickHelpers(PilotTestCase):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def point_at(self, branch, pid):
+        """Record the driver `--detach` would have launched, through the CLI."""
+        self.run_script("issues_state.py", "driver-pointer", "--branch", branch,
+                        "--pid", str(pid), "--log", str(self.home / "logs" / branch / "driver.log"))
+
     def stamp(self, ago=0):
         t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ago)
         return t.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -441,6 +446,92 @@ class Quick(QuickHelpers):
 
     def test_the_log_line_names_driver_log(self):
         self.assertIn("driver.log", self.quick())
+
+
+class DriverPointer(QuickHelpers):
+    """`driver-pointer` and what `quick` and `report` make of it."""
+
+    def pointer(self, check=True):
+        return self.run_script("issues_state.py", "driver-pointer", check=check)
+
+    def test_no_pointer_exits_one(self):
+        out = self.pointer(check=False)
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(out.stdout, "")
+
+    def test_the_pointer_round_trips_and_sits_next_to_the_state_file(self):
+        self.point_at("issues-7-8", 4242)
+        data = json.loads(self.pointer().stdout)
+        self.assertEqual(data["branch"], "issues-7-8")
+        self.assertEqual(data["pid"], 4242)
+        self.assertTrue(data["log"].endswith("issues-7-8/driver.log"))
+        self.assertIn("started_at", data)
+        state_file = pathlib.Path(self.run_script("issues_state.py", "path").stdout.strip())
+        (file,) = state_file.parent.glob("issues-driver-*.json")
+        self.assertEqual(file.name.replace("issues-driver-", "issues-run-"), state_file.name)
+
+    def test_the_pointer_is_rewritten_by_the_next_detach(self):
+        self.point_at("issues-7-8", 1)
+        self.point_at("issues-9", 2)
+        self.assertEqual(json.loads(self.pointer().stdout)["branch"], "issues-9")
+
+    def test_an_unreadable_pointer_is_no_pointer(self):
+        self.point_at("issues-7-8", 1)
+        state_file = pathlib.Path(self.run_script("issues_state.py", "path").stdout.strip())
+        (file,) = state_file.parent.glob("issues-driver-*.json")
+        file.write_text("{not json")
+        self.assertEqual(self.pointer(check=False).returncode, 1)
+
+    def test_a_pointer_for_the_states_branch_behaves_as_driver_pid_does(self):
+        (self.log_dir() / "driver.pid").write_text(f"{os.getpid()}\n")
+        self.point_at("issues-1-2-3", os.getpid())
+        out = self.quick()
+        self.assertIn(f"driver     : running (pid {os.getpid()})", out)
+        self.assertIn("progress   : 0/3 done", out)
+
+    def test_the_pid_comes_from_the_pointers_branch_not_the_states(self):
+        # The state names issues-1-2-3 and has a dead pid; the pointer names
+        # another branch whose driver.pid is alive.
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        (self.log_dir() / "driver.pid").write_text(f"{proc.pid}\n")
+        other = self.home / "logs" / "issues-7-8"
+        other.mkdir(parents=True)
+        (other / "driver.pid").write_text(f"{os.getpid()}\n")
+        self.point_at("issues-7-8", os.getpid())
+        out = self.quick()
+        self.assertIn(f"driver     : starting issues-7-8 (pid {os.getpid()})", out)
+        self.assertIn("progress   : not initialised yet", out)
+        self.assertIn("logs/issues-7-8/driver.log", out)
+        self.assertNotIn("issues-1-2-3", out)
+
+    def test_report_is_quick_while_the_pointed_driver_is_starting(self):
+        other = self.home / "logs" / "issues-7-8"
+        other.mkdir(parents=True)
+        (other / "driver.pid").write_text(f"{os.getpid()}\n")
+        self.point_at("issues-7-8", os.getpid())
+        out = self.run_script("issues_state.py", "report").stdout
+        self.assertTrue(out.startswith("report     : quick\n"))
+        self.assertIn("starting issues-7-8", out)
+
+    def test_status_names_the_pointers_log(self):
+        other = self.home / "logs" / "issues-7-8"
+        other.mkdir(parents=True)
+        (other / "driver.pid").write_text(f"{os.getpid()}\n")
+        self.point_at("issues-7-8", os.getpid())
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn("for issues-7-8", out)
+        self.assertIn("logs/issues-7-8/driver.log", out)
+
+    def test_a_dead_pointed_driver_says_it_stopped_before_initialising(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        other = self.home / "logs" / "issues-7-8"
+        other.mkdir(parents=True)
+        (other / "driver.pid").write_text(f"{proc.pid}\n")
+        self.point_at("issues-7-8", proc.pid)
+        out = self.quick()
+        self.assertIn("stopped before initialising issues-7-8", out)
 
 
 class Report(QuickHelpers):
@@ -695,6 +786,75 @@ class Wait(QuickHelpers):
         self.assertIn("returned", out.stdout, out.stderr)
         self.assertTrue(script.exists())
 
+    def other_driver(self, pid, log=None):
+        """A driver for issues-7-8 while the state still names issues-1-2-3."""
+        other = self.home / "logs" / "issues-7-8"
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "driver.pid").write_text(f"{pid}\n")
+        if log is not None:
+            (other / "driver.log").write_text(log)
+        self.point_at("issues-7-8", pid)
+
+    def rewrite_state_as(self, branch):
+        self.run_script("issues_state.py", "init", "1", "2", "--branch", branch)
+
+    def test_a_pointer_for_the_states_branch_waits_like_driver_pid(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        self.point_at("issues-1-2-3", child.pid)
+        (self.log_dir() / "driver.pid").write_text(f"{child.pid}\n")
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait(timeout=1)
+        child.kill()
+        child.wait()
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertTrue(out.startswith("report     : full\n"))
+
+    def test_a_driver_still_starting_another_run_keeps_wait_waiting(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        self.other_driver(child.pid)
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait(timeout=1)
+        self.assertEqual(self.notifications(), [])
+
+    def test_the_run_being_initialised_and_the_driver_stopping_gives_its_full_report(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        self.other_driver(child.pid)
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        self.rewrite_state_as("issues-7-8")
+        child.kill()
+        child.wait()
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertTrue(out.startswith("report     : full\n"))
+        self.assertIn("branch     : issues-7-8", out)
+        self.assertEqual(len(self.notifications()), 1)
+
+    def test_a_driver_that_dies_before_initialising_exits_one_with_its_log(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        self.other_driver(child.pid, log="one\nDRIVER-TAIL\n")
+        proc = self.start_wait()
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        child.kill()
+        child.wait()
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 1, err)
+        self.assertIn("driver for issues-7-8 stopped before initialising the run "
+                      f"(pid {child.pid}); the state still describes issues-1-2-3", out)
+        self.assertIn("DRIVER-TAIL", out)
+        self.assertNotIn("report     : full", out)
+        (call,) = self.notifications()
+        self.assertIn("stopped before initialising", call)
+
     def test_without_a_run_it_fails_as_status_does(self):
         shutil.rmtree(self.home / "state")
         out = self.wait_cmd()
@@ -714,6 +874,18 @@ class WatchInTheCommands(unittest.TestCase):
             for needle in ('pilot_config.py" get watch',
                            'issues_state.py" wait', "run_in_background"):
                 self.assertTrue(needle in text, f"{name} lacks {needle}")
+
+    def test_a_failed_detach_stops_before_the_wait(self):
+        for name in ("run.md", "fix.md"):
+            text = " ".join(self.text(name).split())
+            for needle in ("exits non-zero", "do **not** start the background `wait`",
+                           "stopped before initialising"):
+                self.assertIn(needle, text, f"{name} lacks {needle}")
+
+    def test_run_md_writes_the_notes_with_the_write_tool_in_one_step(self):
+        text = self.text("run.md")
+        self.assertIn("Write tool", text)
+        self.assertIn("shell chain", text)
 
     def test_status_md_never_waits(self):
         self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))

@@ -29,7 +29,14 @@
 # is, and returns at once.  That is how /issue-pilot:run starts it, since a
 # run takes hours and no tool call lives that long.  A detached run has nobody to
 # interview, so it needs the answers up front (--notes-file / --notes) or none at
-# all (--no-interview).
+# all (--no-interview).  --detach itself returns once the child has initialised
+# the run (the state file names the run branch and has been rewritten), so a
+# `wait` or a status started right after reads this run's state and not the
+# previous one's; it fails, with the tail of the log, if the child dies first,
+# and gives up waiting after ISSUE_PILOT_DETACH_TIMEOUT seconds (120 by default;
+# 0 returns at once) with exit 0, the run still going.  It also records the
+# driver it launched (issues_state.py driver-pointer), which is how `wait`,
+# `quick` and `report` know whose driver to look at.
 #
 #   issues_run.sh 165 166 170           # base branch synced with origin, run branch cut from it
 #   issues_run.sh --from-head 165 166   # cut it from HEAD instead (offline, or on purpose)
@@ -74,7 +81,7 @@ while [[ $# -gt 0 ]]; do
     --notes-file) NOTES_FILE="$2"; INTERVIEW=0; shift 2;;
     --detach) DETACH=1;    shift;;      # run in the background, return at once
     --repo)   REPO="$2";   shift 2;;
-    --resume) RESUME=1;    shift;;      # continue a run, retrying if blocked
+    --resume) RESUME=1; INTERVIEW=0; shift;;  # continue a run, retrying if blocked; nothing to ask
     --fix)    FIX=1; INTERVIEW=0; shift;;  # apply a pending review fix to a finished run
     --no-interview) INTERVIEW=0; shift;;
     --from-head) FROM_HEAD=1; shift;;   # cut the run branch from HEAD, not origin
@@ -306,6 +313,25 @@ MSG
   for a in "${ORIG_ARGS[@]}"; do [[ "$a" == "--detach" ]] || child+=("$a"); done
   driver_log="$LOGDIR/driver.log"
 
+  # The state file is one per repository and the child rewrites it only after
+  # syncing the base branch and cutting the run branch, so until then it still
+  # describes the previous run.  Remember what it looks like now, to tell the
+  # moment it stops doing so.
+  state_stamp() {  # mtime in ns of the state file, or "absent"
+    python3 -c '
+import os, sys
+try:
+    print(os.stat(sys.argv[1]).st_mtime_ns)
+except OSError:
+    print("absent")
+' "$(python3 "$STATE" path)"
+  }
+  state_branch() {  # the branch the state names, or nothing
+    python3 "$STATE" show 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("branch") or "")' 2>/dev/null || true
+  }
+  before="$(state_stamp)"
+
   # setsid is what survives the caller's process group being cleaned up; where
   # there is none (macOS), nohup and a disowned job are the best available.
   if command -v setsid >/dev/null 2>&1; then
@@ -316,6 +342,50 @@ MSG
   pid=$!
   disown 2>/dev/null || true
   echo "$pid" >"$LOGDIR/driver.pid"
+  # Which driver this is, for `wait`, `quick` and `report`: they must not guess
+  # it from a state file that may still describe another run.
+  python3 "$STATE" driver-pointer --branch "$BRANCH" --pid "$pid" --log "$driver_log" >/dev/null
+
+  # Return once the state describes this run, so whoever reads it next -- a
+  # `wait` started right after this, `/issue-pilot:status` -- reads this run's.
+  # ISSUE_PILOT_DETACH_TIMEOUT (seconds, 120 by default, 0 to not wait at all)
+  # caps it, so a hung fetch cannot hang the caller too.
+  detach_timeout="${ISSUE_PILOT_DETACH_TIMEOUT:-120}"
+  [[ "$detach_timeout" =~ ^[0-9]+$ ]] || detach_timeout=120
+  initialised() {
+    [[ "$(state_stamp)" != "$before" && "$(state_branch)" == "$BRANCH" ]]
+  }
+  if [[ "$detach_timeout" != "0" ]]; then
+    deadline=$((SECONDS + detach_timeout))
+    until initialised; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        # It may have initialised the run and finished since the check above.
+        initialised && break
+        {
+          echo "error: the driver exited before initialising the run; see $driver_log"
+          echo "--- last 20 lines of $driver_log ---"
+          tail -n 20 "$driver_log"
+        } >&2
+        exit 1
+      fi
+      if (( SECONDS >= deadline )); then
+        cat <<MSG
+the driver is still starting after $detach_timeout s (syncing the base branch); follow $driver_log
+  branch : $BRANCH
+  pid    : $pid
+MSG
+        exit 0
+      fi
+      sleep 0.5
+    done
+  else
+    cat <<MSG
+the driver is still starting (ISSUE_PILOT_DETACH_TIMEOUT=0); follow $driver_log
+  branch : $BRANCH
+  pid    : $pid
+MSG
+    exit 0
+  fi
 
   cat <<MSG
 run started in the background (pid $pid)
