@@ -28,14 +28,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" status
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" show
 ```
 
-- No run in progress: **stop**, say so in plain words.
+- No run in progress: **stop**, say so in plain words, and suggest
+  `/issue-pilot:plan $ARGUMENTS` — a fix only corrects a finished run that has
+  no pull request yet, and people type `fix` when they meant `plan`.
 - Any issue still `pending`, or `blocked` is not null: **stop**, say what is in
   the way and point at `issues_run.sh --resume` to get the run itself to a
   finished state first. A fix session is not the place to also chase down a
   stuck issue.
 - `pull_request` is already recorded: **stop**. The branch is already under
   review out there; a finding at this point goes into the pull request by hand
-  (a commit and a comment), not through this command.
+  (a commit and a comment), not through this command. If it was really a new
+  piece of work, suggest `/issue-pilot:plan $ARGUMENTS` instead.
+
+(The `UserPromptSubmit` hook enforces the no-run and `pull_request` cases before
+the model sees the prompt; these bullets are the fallback when it is not
+installed.)
 
 ## 2. Read the work, without checking anything out
 

@@ -6,6 +6,19 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-26
+
+### Changed
+
+- `/issue-pilot:fix <finding>` is refused, before it reaches the model, when
+  the repository has no run state or the run's pull request is already
+  recorded -- typing it then is nearly always a slip for `/issue-pilot:plan`.
+  The refusal shows `/issue-pilot:plan <the same text>` ready to copy and, when
+  the pull request is open, says a finding on it goes in by hand. Any doubt (no
+  `cwd`, not a git repository, an unreadable state file) lets the prompt
+  through, and the hook never creates the state directory. `commands/fix.md`
+  step 1 states the same two cases for installs without the hook.
+
 ## [0.5.2] - 2026-10-22
 
 ### Fixed
