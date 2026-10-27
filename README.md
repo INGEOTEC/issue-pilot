@@ -332,6 +332,11 @@ pull request, in its own section, with no `Closes` (there is no issue to
 close). A finished run's state refuses to be started over with the same issue
 list precisely so this is the way back in, not a rerun.
 
+`/issue-pilot:fix` refuses, before the model sees it, when the repository has
+no finished run waiting for a fix — no run at all, or one whose pull request is
+already open — and hands back `/issue-pilot:plan <your text>`, which is nearly
+always what was meant.
+
 **Logs.** The driver's own output goes to
 `~/.claude/issue-pilot/logs/<branch>/driver.log`, and every attempt is kept
 whole, with the exit status of `claude` at the end, in
@@ -466,7 +471,7 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background and tells the conversation when it stops (`"watch": false` turns that off). |
 | `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
-| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). |
+| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). Refuses, and suggests `/issue-pilot:plan`, when there is no run, or its pull request is already open. |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
 | `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
 | `/issue-pilot:one <n>` | One issue. Called by the driver; you rarely run it yourself. |
