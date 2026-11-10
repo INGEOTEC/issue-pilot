@@ -67,7 +67,7 @@ cd issue-pilot
 ./install.sh --hook      # --hook also registers the usage guard
 ```
 
-**Requirements:** `git`, `python3` (3.9+, standard library only), the
+**Requirements:** `git`, `python3` (3.10+, standard library only), the
 [GitHub CLI](https://cli.github.com) authenticated (`gh auth login`), `curl`,
 and a `claude` that can start subprocesses of its own — run `claude setup-token`
 once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is

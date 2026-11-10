@@ -14,6 +14,8 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `.issue-pilot.json`, like `test_command` and `base_branch`, even when they are
   the defaults, so the file says what the runs use instead of following the
   plugin's defaults across versions. Existing files are not rewritten.
+- The oldest supported `python3` is now 3.10 (was 3.9). Python 3.9 reached its
+  end of life in October 2025, and CI's `ubuntu-latest` image no longer has it.
 
 ### Fixed
 
