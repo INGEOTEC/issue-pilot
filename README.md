@@ -242,7 +242,11 @@ to answer, so `/issue-pilot:run` reads every issue in the list, reads
 `CLAUDE.md` and the code, and asks all of its questions at once, in the session
 you are sitting in. The answers go to a file and are passed to every autonomous
 session as `--notes` — they are the only thing that survives the clearing between
-issues.
+issues. The file is `state/notes/<slug>-<branch>.txt`, per repository (the slug is
+the one in the run state's name); `pilot_config.py notes-file --fresh <issues>`
+prints that path after emptying it, so a file left by an earlier run, in this
+repository or another, is never mistaken for this run's. `--fresh` also removes
+the old-format `state/issues-notes-*.txt` files, and nothing else.
 
 **The run itself is detached.** It is started with `--detach`, in a session of
 its own, so it outlives both the tool call that started it and the conversation

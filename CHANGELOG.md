@@ -6,6 +6,23 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-11-10
+
+### Fixed
+
+- A run's notes were kept at `state/issues-notes-<branch>.txt`, a name with no
+  repository in it, so every repository running the same issue numbers shared
+  one file. They now live at `state/notes/<slug>-<branch>.txt`, with the same
+  slug as the run state file.
+- A notes file left by an earlier run made the Write tool refuse to overwrite it
+  (it had not been read), and the driver was then started on the stale -- even
+  foreign -- notes because the file was non-empty. `pilot_config.py notes-file
+  --fresh` removes whatever is at the path before printing it; `/issue-pilot:run`
+  step 4 and the driver's interactive phase 1 use it. Plain `notes-file` still
+  deletes nothing.
+- The old-format `state/issues-notes-*.txt` files are removed by `--fresh`
+  (top-level files only; the state, driver and any other file are left alone).
+
 ## [0.5.3] - 2026-10-26
 
 ### Changed

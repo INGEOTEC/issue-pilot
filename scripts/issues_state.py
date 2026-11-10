@@ -116,8 +116,9 @@ def now():
 
 
 def repo_slug(root=None):
-    root = root or pilot_config.repo_root()
-    return root.strip("/").replace("/", "-")
+    # The rule lives in pilot_config so the notes path and this file's name
+    # cannot drift apart.
+    return pilot_config.repo_slug(root)
 
 
 def state_path(root=None):

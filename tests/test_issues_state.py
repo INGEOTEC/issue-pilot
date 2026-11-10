@@ -887,6 +887,9 @@ class WatchInTheCommands(unittest.TestCase):
         self.assertIn("Write tool", text)
         self.assertIn("shell chain", text)
 
+    def test_run_md_asks_for_a_fresh_notes_path(self):
+        self.assertIn("notes-file --fresh", self.text("run.md"))
+
     def test_status_md_never_waits(self):
         self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))
 
