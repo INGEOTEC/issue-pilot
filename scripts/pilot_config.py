@@ -77,13 +77,45 @@ def branch_name(issues, cfg=None) -> str:
     return "%s-%s" % (cfg["branch_prefix"], "-".join(str(n) for n in issues))
 
 
+def repo_slug(root=None) -> str:
+    """The repository's path as one file-name-safe word (`/home/u/foo` -> `home-u-foo`).
+
+    Also names the run state file: `issues_state.repo_slug()` calls this. It
+    lives here because `issues_state` imports this module, not the other way.
+    """
+    root = root or repo_root()
+    return root.strip("/").replace("/", "-")
+
+
 def notes_file(issues, cfg=None) -> pathlib.Path:
     """Where the answers gathered before a run are kept.
 
     They are written by whoever conducts the interview and read by the driver;
     both sides ask for the path here so they cannot disagree about it.
+
+    The path is per repository (`state/notes/<slug>-<branch>.txt`): the branch
+    name alone is the same in every repository that runs the same issue numbers.
+    Only prints a path; see `fresh_notes_file()` for the one that clears it.
     """
-    return state_dir() / ("issues-notes-%s.txt" % branch_name(issues, cfg))
+    return state_dir() / "notes" / ("%s-%s.txt" % (repo_slug(), branch_name(issues, cfg)))
+
+
+def fresh_notes_file(issues, cfg=None) -> pathlib.Path:
+    """`notes_file()`, with nothing at that path, ready for a brand-new file.
+
+    A file left by an earlier run of the same issues would make the Write tool
+    refuse to overwrite it (it has not read it) and let a stale answer sheet be
+    taken for this run's. Also deletes the old-format notes, which lived
+    directly in the state directory under a name that did not include the
+    repository: `state/issues-notes-*.txt`, files only, and nothing else there.
+    """
+    path = notes_file(issues, cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    for legacy in state_dir().glob("issues-notes-*.txt"):
+        if legacy.is_file() or legacy.is_symlink():
+            legacy.unlink(missing_ok=True)
+    return path
 
 
 def running_copy():
@@ -290,6 +322,9 @@ def main():
     p.add_argument("issues", nargs="+", type=int)
 
     p = sub.add_parser("notes-file", help="print where a run over these issues keeps its answers")
+    p.add_argument("--fresh", action="store_true",
+                   help="first remove any file already at that path, and the old-format "
+                        "notes (state/issues-notes-*.txt), so the caller writes a new one")
     p.add_argument("issues", nargs="+", type=int)
 
     args = ap.parse_args()
@@ -331,7 +366,7 @@ def main():
     elif args.cmd == "branch-name":
         print(branch_name(args.issues))
     elif args.cmd == "notes-file":
-        print(notes_file(args.issues))
+        print(fresh_notes_file(args.issues) if args.fresh else notes_file(args.issues))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ jobs:
       matrix:
         # The toolkit runs on whatever python3 the user's machine already has,
         # so the oldest version we claim to support is tested too.
-        python-version: ["3.9", "3.13"]
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

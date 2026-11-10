@@ -887,6 +887,16 @@ class WatchInTheCommands(unittest.TestCase):
         self.assertIn("Write tool", text)
         self.assertIn("shell chain", text)
 
+    def test_run_md_asks_for_a_fresh_notes_path(self):
+        self.assertIn("notes-file --fresh", self.text("run.md"))
+
+    def test_init_md_always_writes_model_and_effort(self):
+        # Corrects a review finding (fix-1): init used to leave out model and
+        # effort when they were the defaults.
+        text = " ".join(self.text("init.md").split())
+        self.assertIn("`test_command`, `base_branch`, `model` and `effort` always",
+                      text)
+
     def test_status_md_never_waits(self):
         self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))
 

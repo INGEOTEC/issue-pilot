@@ -446,9 +446,9 @@ if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
   if [[ $INTERVIEW -eq 1 ]]; then
     [[ -t 0 ]] || { echo "error: phase 1 needs a terminal to ask its questions; run this from your own shell, or pass --notes/--no-interview." >&2; exit 2; }
 
-    notes_file="$(python3 "$CONFIG" notes-file "${ARGS[@]}")"
-    mkdir -p "$(dirname "$notes_file")"
-    rm -f "$notes_file"
+    # --fresh: nothing may be left at the path from an earlier run, here or in
+    # another repository (and it creates the directory).
+    notes_file="$(python3 "$CONFIG" notes-file --fresh "${ARGS[@]}")"
 
     echo "=== phase 1: reading every issue and asking what it needs (interactive) ==="
     # Interactive on purpose, and the only interactive step of the run: the

@@ -97,8 +97,12 @@ They are the only thing that survives the clearing between issues, so they go to
 disk, written for a session that never saw this conversation:
 
 ```bash
-NOTES="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" notes-file $ARGUMENTS)"
+NOTES="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" notes-file --fresh $ARGUMENTS)"
 ```
+
+`--fresh` empties that path first: it may hold the notes of an earlier run, and
+the Write tool refuses to overwrite a file it has not read, so the write would
+fail and the run would start from stale answers.
 
 Write to that path with the Write tool, in one step: the answers, the defaults
 you decided, which issue each point applies to, what has changed in the code

@@ -67,7 +67,7 @@ cd issue-pilot
 ./install.sh --hook      # --hook also registers the usage guard
 ```
 
-**Requirements:** `git`, `python3` (3.9+, standard library only), the
+**Requirements:** `git`, `python3` (3.10+, standard library only), the
 [GitHub CLI](https://cli.github.com) authenticated (`gh auth login`), `curl`,
 and a `claude` that can start subprocesses of its own — run `claude setup-token`
 once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is
@@ -242,7 +242,11 @@ to answer, so `/issue-pilot:run` reads every issue in the list, reads
 `CLAUDE.md` and the code, and asks all of its questions at once, in the session
 you are sitting in. The answers go to a file and are passed to every autonomous
 session as `--notes` — they are the only thing that survives the clearing between
-issues.
+issues. The file is `state/notes/<slug>-<branch>.txt`, per repository (the slug is
+the one in the run state's name); `pilot_config.py notes-file --fresh <issues>`
+prints that path after emptying it, so a file left by an earlier run, in this
+repository or another, is never mistaken for this run's. `--fresh` also removes
+the old-format `state/issues-notes-*.txt` files, and nothing else.
 
 **The run itself is detached.** It is started with `--detach`, in a session of
 its own, so it outlives both the tool call that started it and the conversation

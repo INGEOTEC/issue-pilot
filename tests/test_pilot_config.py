@@ -4,9 +4,13 @@ The point of these tests is the precedence: a project setting must beat the
 default, and a single run's environment must beat the project.
 """
 import json
+import os
+import pathlib
+import subprocess
+import sys
 import unittest
 
-from support import PilotTestCase
+from support import SCRIPTS, PilotTestCase
 
 
 class Configuration(PilotTestCase):
@@ -148,6 +152,94 @@ class Configuration(PilotTestCase):
     def test_state_lives_under_issue_pilot_home(self):
         out = self.run_script("pilot_config.py", "path")
         self.assertTrue(out.stdout.strip().startswith(str(self.home)))
+
+
+class NotesFile(PilotTestCase):
+    """Where a run's answers live: per repository, and cleared on request."""
+
+    def notes(self, *args, cwd=None):
+        out = subprocess.run(
+            [sys.executable, str(SCRIPTS / "pilot_config.py"), "notes-file", *args],
+            cwd=cwd or self.repo, capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return pathlib.Path(out.stdout.strip())
+
+    def other_repo(self):
+        other = pathlib.Path(self.tmp.name) / "other" / "repo"
+        other.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=other, check=True, capture_output=True)
+        return other
+
+    def test_the_path_is_under_notes_and_names_the_repository_and_branch(self):
+        path = self.notes("56")
+        self.assertEqual(path.parent, self.home / "state" / "notes")
+        slug = os.path.realpath(self.repo).strip("/").replace("/", "-")
+        self.assertEqual(path.name, "%s-issues-56.txt" % slug)
+
+    def test_two_repositories_get_two_paths(self):
+        other = self.other_repo()
+        self.assertNotEqual(self.notes("56"), self.notes("56", cwd=other))
+
+    def test_plain_notes_file_deletes_nothing(self):
+        path = self.notes("56")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("answers\n")
+        legacy = self.home / "state" / "issues-notes-issues-56.txt"
+        legacy.write_text("old\n")
+        self.assertEqual(self.notes("56"), path)
+        self.assertTrue(path.exists())
+        self.assertTrue(legacy.exists())
+
+    def test_fresh_removes_the_file_at_the_path(self):
+        path = self.notes("56")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("answers of an earlier run\n")
+        self.assertEqual(self.notes("--fresh", "56"), path)
+        self.assertFalse(path.exists())
+        self.assertTrue(path.parent.is_dir())
+
+    def test_fresh_works_when_there_is_nothing_to_remove(self):
+        path = self.notes("--fresh", "56")
+        self.assertFalse(path.exists())
+        self.assertTrue(path.parent.is_dir())
+
+    def test_fresh_removes_the_legacy_files_and_spares_everything_else(self):
+        state = self.home / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        legacy = [state / "issues-notes-issues-56.txt", state / "issues-notes-issues-1-2.txt"]
+        spared = [state / "issues-run-home-u-foo.json", state / "issues-driver-home-u-foo.json",
+                  state / "guard.json", state / "issues-notes.txt", state / "notes-issues-56.txt"]
+        for f in legacy + spared:
+            f.write_text("x\n")
+        a_directory = state / "issues-notes-a-directory.txt"
+        a_directory.mkdir()
+        (a_directory / "inner.txt").write_text("x\n")
+
+        other_notes = state / "notes" / "somewhere-else-issues-56.txt"
+        other_notes.parent.mkdir()
+        other_notes.write_text("another repository\n")
+        legacy_in_notes = state / "notes" / "issues-notes-issues-56.txt"
+        legacy_in_notes.write_text("a new-format name that happens to look old\n")
+
+        self.notes("--fresh", "56")
+
+        for f in legacy:
+            self.assertFalse(f.exists(), f)
+        for f in spared + [other_notes, legacy_in_notes, a_directory / "inner.txt"]:
+            self.assertTrue(f.exists(), f)
+
+    def test_fresh_leaves_the_notes_of_another_repository_with_the_same_issues(self):
+        other = self.other_repo()
+        theirs = self.notes("--fresh", "56", cwd=other)
+        theirs.write_text("their answers\n")
+        mine = self.notes("--fresh", "56")
+        self.assertNotEqual(mine, theirs)
+        self.assertEqual(theirs.read_text(), "their answers\n")
+
+    def test_the_drivers_interview_path_asks_for_a_fresh_notes_file(self):
+        # Phase 1 needs a terminal, so it cannot be run here: check the call.
+        text = (SCRIPTS / "issues_run.sh").read_text()
+        self.assertIn('notes-file --fresh "${ARGS[@]}"', text)
 
 
 if __name__ == "__main__":
