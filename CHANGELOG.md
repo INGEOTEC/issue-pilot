@@ -8,6 +8,13 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.5.4] - 2026-11-10
 
+### Changed
+
+- `/issue-pilot:init` now always writes `model` and `effort` to
+  `.issue-pilot.json`, like `test_command` and `base_branch`, even when they are
+  the defaults, so the file says what the runs use instead of following the
+  plugin's defaults across versions. Existing files are not rewritten.
+
 ### Fixed
 
 - A run's notes were kept at `state/issues-notes-<branch>.txt`, a name with no

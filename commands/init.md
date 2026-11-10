@@ -84,9 +84,12 @@ on the base it configures:
 ISSUE_PILOT_BASE_BRANCH=<chosen> bash "${CLAUDE_PLUGIN_ROOT}/scripts/base_sync.sh"
 ```
 
-Write `.issue-pilot.json` at the repository root, pretty-printed, with the
-settings that differ from the defaults plus `test_command` and `base_branch`
-always. Then prove it is valid:
+Write `.issue-pilot.json` at the repository root, pretty-printed, with
+`test_command`, `base_branch`, `model` and `effort` always, plus any other
+setting that differs from its default. `model` and `effort` are written even
+when they are the defaults: the file should say what the runs use, not leave it
+to the plugin's defaults, which can change between versions. Then prove it is
+valid:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" check
