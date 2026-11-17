@@ -361,9 +361,16 @@ whatever it is called, rather than a hardcoded list, in one of two ways:
   remote, ssh-only machine is usually logged in) is refused by the endpoint
   above.
 
-By default (`USAGE_GUARD_SOURCE=auto`) the first is tried and a 401/403 falls
-back to the second in the same run, so a machine only pays for the headers
-probe when it has to. Both feed the same decision.
+By default (`USAGE_GUARD_SOURCE=auto`) the first is tried and a 401, 403 or 429
+falls back to the second in the same run, so a machine only pays for the headers
+probe when it has to. The endpoint is then left alone: for a day after a 401/403
+(a token's scope does not change while it is the same token;
+`USAGE_GUARD_OAUTH_RETRY`), for its own `retry-after` after a 429. That record
+(`usage-guard.oauth-skip`) holds a time and a short fingerprint of the token,
+never the token, so logging in differently takes effect at once; it is kept
+apart from the backoff that a 429 from the headers probe itself causes
+(`usage-guard.backoff`), because one endpoint being refused says nothing about
+the other. Both readings feed the same decision.
 
 The token comes from, in order: `CLAUDE_CODE_OAUTH_TOKEN`, an `export` of it in
 `~/.bashrc`, `~/.zshrc` or `~/.profile`, `~/.claude/.credentials.json`, and — on
@@ -409,12 +416,16 @@ it never sleeps and never writes a halt:
     {"window": "5h", "percent": 10, "seconds_until_reset": 3600,
      "scope": "short", "verdict": "ok", "wait_seconds": 0}
   ],
-  "halt": null
+  "halt": null,
+  "reason": null
 }
 ```
 
 - `source` — `oauth_usage` or `headers`, whichever produced the reading, or
   `null` when none did (for instance a 429).
+- `reason` — `null` when there is a reading; otherwise one sentence naming what
+  refused and the HTTP status (`usage endpoint rate limited (HTTP 429), retry in
+  2457s; headers probe answered HTTP 500`).
 - `windows` — every window the API named. From `/api/oauth/usage` they are
   `5h`, `7d` and one `7d_<model>` per model-scoped weekly limit. `scope` is `long` for a window that
   resets later than `max_wait`, `short` otherwise. `verdict` is `ok`, `wait`
@@ -434,6 +445,7 @@ prints `{"error": ...}` instead, and the guard lets every call through.
 | `USAGE_GUARD_LONG_THRESHOLD` | `90` | Percent of a long (weekly) window at which to halt. |
 | `USAGE_GUARD_LONG_ACTION` | `halt` | `halt`, `warn` or `ignore`. |
 | `USAGE_GUARD_SOURCE` | `auto` | `auto`, `headers` or `oauth`: which reading to take (see above). |
+| `USAGE_GUARD_OAUTH_RETRY` | `86400` | Seconds to leave `/api/oauth/usage` alone after a 401/403 (a 429 uses its own `retry-after`). Only in `auto`. |
 | `USAGE_GUARD_INTERVAL` | `300` | Seconds between real measurements. |
 | `USAGE_GUARD_MAX_WAIT` | `21600` | Longest single sleep, and the line between a short and a long window. |
 | `USAGE_GUARD_MODEL` | `claude-haiku-4-5-20251001` | Model used for the probe. |

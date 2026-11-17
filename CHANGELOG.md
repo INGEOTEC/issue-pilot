@@ -6,6 +6,24 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-17
+
+### Fixed
+
+- The usage guard no longer goes blind on a machine whose token cannot use
+  `/api/oauth/usage` (a `claude setup-token` one). A 429 from that endpoint now
+  falls back to the headers probe in the same run, as a 401/403 already did,
+  instead of returning nothing; and it no longer writes the backoff file that
+  parks the headers probe, which was working all along. The endpoint gets a
+  record of its own (`usage-guard.oauth-skip`, keyed by a fingerprint of the
+  token) and is left alone for a day after a 401/403
+  (`USAGE_GUARD_OAUTH_RETRY`) or for its `retry-after` after a 429, in hook mode
+  and in `--check`, so the guard stops asking it every five minutes, which is
+  what kept it rate limited. `USAGE_GUARD_SOURCE=oauth` still asks it on purpose.
+- `usage-guard.sh --check` has a `reason` key saying why nothing was read, and
+  `/issue-pilot:usage` reports it. The log names the endpoint (`usage endpoint
+  rate limited (429)` versus `headers probe rate limited (429)`).
+
 ## [0.6.0] - 2026-11-17
 
 ### Removed

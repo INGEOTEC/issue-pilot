@@ -303,6 +303,7 @@ class UsageGuard(PilotTestCase):
     def test_a_token_that_cannot_read_oauth_usage_falls_back_to_the_headers(self):
         for code in ("403", "401"):
             with self.subTest(code=code):
+                self.skip_file.unlink(missing_ok=True)   # one refusal per subtest
                 out = self.curl_run("--check", FAKE_OAUTH_CODE=code,
                                     FAKE_HEADERS=self.headers(**{"5h": (0.3, 3600)}))
                 report = json.loads(out.stdout)
@@ -311,18 +312,215 @@ class UsageGuard(PilotTestCase):
                 self.assertEqual(self.curl_calls(), ["oauth", "messages"])
                 self.curl_log.unlink()
 
-    def test_a_rate_limited_usage_endpoint_backs_off_and_does_not_probe_on(self):
+    # ---- a usage endpoint that refuses the token is left alone, and the headers answer
+
+    @property
+    def skip_file(self):
+        return self.home / "usage-guard.oauth-skip"
+
+    @property
+    def backoff_file(self):
+        return self.home / "usage-guard.backoff"
+
+    @staticmethod
+    def fingerprint(token):
+        import hashlib
+        return hashlib.sha256(token.encode()).hexdigest()[:12]
+
+    def refused(self, code="429", retry=120, **env):
+        """A --check where the usage endpoint refuses and the headers answer."""
+        out = self.curl_run(
+            "--check", FAKE_OAUTH_CODE=code,
+            FAKE_OAUTH_HEADERS="HTTP/1.1 %s\r\nretry-after: %s\r\n\r\n" % (code, retry),
+            FAKE_HEADERS=self.headers(**{"5h": (0.3, 3600)}), **env)
+        return json.loads(out.stdout)
+
+    def forget_calls(self):
+        (self.home / "curl.log").unlink(missing_ok=True)
+
+    def test_a_rate_limited_usage_endpoint_falls_back_to_the_headers(self):
         import time
         before = int(time.time())
-        out = self.curl_run("--check", FAKE_OAUTH_CODE="429",
-                            FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\nretry-after: 120\r\n\r\n",
+        report = self.refused("429", 120)
+        self.assertEqual(report["source"], "headers")
+        self.assertEqual(report["windows"][0]["percent"], 30)
+        self.assertEqual(self.curl_calls(), ["oauth", "messages"])
+        # The endpoint's 429 is the endpoint's, not the headers probe's.
+        self.assertFalse(self.backoff_file.exists())
+        until, fp = self.skip_file.read_text().split()
+        self.assertTrue(before + 120 <= int(until) <= int(time.time()) + 120)
+        self.assertEqual(fp, self.fingerprint("test-token"))
+
+    def test_after_a_refusal_the_endpoint_is_not_asked_again(self):
+        for code in ("429", "403", "401"):
+            with self.subTest(code=code):
+                self.skip_file.unlink(missing_ok=True)
+                self.refused(code, 3600)
+                self.forget_calls()
+                for _ in range(2):
+                    report = self.refused(code, 3600)
+                    self.assertEqual(report["source"], "headers")
+                    self.assertEqual(report["windows"][0]["percent"], 30)
+                    self.assertEqual(self.curl_calls(), ["messages"] * 1)
+                    self.forget_calls()
+
+    def test_a_refusal_of_401_or_403_is_remembered_for_a_day_by_default(self):
+        import time
+        self.refused("403")
+        until = int(self.skip_file.read_text().split()[0])
+        self.assertTrue(abs(until - (time.time() + 86400)) <= 10)
+
+    def test_the_retry_variable_sets_how_long_a_403_is_remembered(self):
+        import time
+        self.refused("403", USAGE_GUARD_OAUTH_RETRY="600")
+        until = int(self.skip_file.read_text().split()[0])
+        self.assertTrue(abs(until - (time.time() + 600)) <= 10)
+
+    def test_a_429_without_retry_after_is_remembered_for_half_an_hour(self):
+        import time
+        out = self.curl_run("--check", FAKE_OAUTH_CODE="429", FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\n\r\n",
                             FAKE_HEADERS=self.headers(**{"5h": (0.3, 3600)}))
+        self.assertEqual(json.loads(out.stdout)["source"], "headers")
+        until = int(self.skip_file.read_text().split()[0])
+        self.assertTrue(abs(until - (time.time() + 1800)) <= 10)
+
+    def test_the_record_expires(self):
+        for how in ("retry-after 0", "retry variable 0", "past record"):
+            with self.subTest(how=how):
+                self.skip_file.unlink(missing_ok=True)
+                if how == "retry-after 0":
+                    self.refused("429", 0)
+                elif how == "retry variable 0":
+                    self.refused("403", USAGE_GUARD_OAUTH_RETRY="0")
+                else:
+                    self.skip_file.write_text("%d %s\n" % (
+                        int(__import__("time").time()) - 5, self.fingerprint("test-token")))
+                self.forget_calls()
+                report = self.refused("403", 3600)
+                self.assertEqual(self.curl_calls(), ["oauth", "messages"])
+                self.assertEqual(report["source"], "headers")
+                self.forget_calls()
+
+    def test_a_different_token_ignores_the_record(self):
+        import time
+        self.skip_file.write_text("%d %s\n" % (int(time.time()) + 3600,
+                                                self.fingerprint("another-token")))
+        report = self.refused("403")
+        self.assertEqual(self.curl_calls(), ["oauth", "messages"])
+        self.assertEqual(report["source"], "headers")
+
+    def test_a_malformed_record_counts_as_no_record(self):
+        for text in ("", "garbage", "abc def", "99999999999\n", "-5 x"):
+            with self.subTest(text=text):
+                self.skip_file.write_text(text)
+                self.refused("403")
+                self.assertEqual(self.curl_calls(), ["oauth", "messages"])
+                self.forget_calls()
+
+    def test_a_readable_answer_from_the_usage_endpoint_clears_the_record(self):
+        import time
+        self.skip_file.write_text("%d %s\n" % (int(time.time()) - 5, self.fingerprint("test-token")))
+        report = self.oauth_check()
+        self.assertEqual(report["source"], "oauth_usage")
+        self.assertFalse(self.skip_file.exists())
+        self.assertEqual(self.curl_calls(), ["oauth"])
+
+    def test_hook_mode_acts_on_the_headers_when_the_usage_endpoint_is_rate_limited(self):
+        out = self.curl_run(FAKE_OAUTH_CODE="429",
+                            FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\nretry-after: 3600\r\n\r\n",
+                            FAKE_HEADERS=self.headers(**{"5h": (0.1, 3600), "7d": (0.95, 300000)}))
+        self.assertEqual(out.returncode, 2)
+        self.assertTrue(self.halt_file.exists())
+        self.assertIn("7d", self.halt_file.read_text())
+        self.assertEqual(self.curl_calls(), ["oauth", "messages"])
+        self.assertFalse(self.backoff_file.exists())
+
+    def test_hook_mode_logs_a_quiet_headers_reading_and_names_the_endpoint(self):
+        out = self.curl_run(FAKE_OAUTH_CODE="429",
+                            FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\nretry-after: 3600\r\n\r\n",
+                            FAKE_HEADERS=self.headers(**{"5h": (0.1, 3600)}))
+        self.assertEqual(out.returncode, 0)
+        log = (self.home / "usage-guard.log").read_text()
+        self.assertIn("usage endpoint rate limited (429)", log)
+        self.assertIn("reading via headers", log)
+
+    def test_a_429_from_the_headers_probe_still_parks_hook_mode(self):
+        import time
+        out = self.curl_run(FAKE_OAUTH_CODE="403", FAKE_CODE="429",
+                            FAKE_HEADERS="HTTP/1.1 429\r\nretry-after: 600\r\n\r\n")
+        self.assertEqual(out.returncode, 0)
+        until = int(self.backoff_file.read_text())
+        self.assertTrue(abs(until - (time.time() + 600)) <= 10)
+        self.assertIn("headers probe rate limited (429)",
+                      (self.home / "usage-guard.log").read_text())
+        self.forget_calls()
+        # Within the backoff the next call probes nothing at all.
+        out = self.curl_run(FAKE_OAUTH_CODE="403", FAKE_CODE="429")
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(self.curl_calls(), [])
+
+    def test_a_pinned_oauth_source_ignores_the_record_and_never_falls_back(self):
+        import time
+        record = "%d %s\n" % (int(time.time()) + 3600, self.fingerprint("test-token"))
+        self.skip_file.write_text(record)
+        out = self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="200",
+                            FAKE_OAUTH_BODY=self.oauth_body())
+        self.assertEqual(json.loads(out.stdout)["source"], "oauth_usage")
+        self.assertEqual(self.curl_calls(), ["oauth"])
+        self.assertEqual(self.skip_file.read_text(), record)      # neither read nor written
+        self.forget_calls()
+        out = self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="429",
+                            FAKE_HEADERS=self.headers(**{"5h": (0.3, 3600)}))
+        self.assertEqual(json.loads(out.stdout)["windows"], [])
+        self.assertEqual(self.curl_calls(), ["oauth"])
+        self.assertEqual(self.skip_file.read_text(), record)
+
+    def test_a_pinned_oauth_source_does_not_write_a_record(self):
+        self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="429")
+        self.assertFalse(self.skip_file.exists())
+
+    def test_a_pinned_headers_source_never_asks_the_usage_endpoint(self):
+        self.curl_run("--check", USAGE_GUARD_SOURCE="headers", FAKE_OAUTH_CODE="429",
+                      FAKE_HEADERS=self.headers(**{"5h": (0.3, 3600)}))
+        self.assertEqual(self.curl_calls(), ["messages"])
+        self.assertFalse(self.skip_file.exists())
+
+    def test_check_gives_no_reason_with_a_reading(self):
+        report = self.refused("429")
+        self.assertIsNone(report["reason"])
+        self.skip_file.unlink()
+        self.assertIsNone(self.oauth_check()["reason"])
+
+    def test_check_says_which_endpoint_refused_when_both_fail(self):
+        out = self.curl_run("--check", FAKE_OAUTH_CODE="429",
+                            FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\nretry-after: 2457\r\n\r\n",
+                            FAKE_CODE="500", FAKE_HEADERS="HTTP/1.1 500\r\n\r\n")
         report = json.loads(out.stdout)
         self.assertEqual(report["windows"], [])
-        self.assertIsNone(report["source"])
-        self.assertEqual(self.curl_calls(), ["oauth"])
-        until = int((self.home / "usage-guard.backoff").read_text())
-        self.assertTrue(before + 120 <= until <= int(time.time()) + 120)
+        self.assertIn("usage endpoint rate limited (HTTP 429), retry in 2457s", report["reason"])
+        self.assertIn("headers probe answered HTTP 500", report["reason"])
+        for key in ("source", "thresholds", "windows", "halt"):
+            self.assertIn(key, report)
+
+    def test_the_reason_covers_an_endpoint_left_alone_and_a_pinned_source(self):
+        self.refused("403")
+        out = self.curl_run("--check", FAKE_CODE="500", FAKE_HEADERS="HTTP/1.1 500\r\n\r\n")
+        reason = json.loads(out.stdout)["reason"]
+        self.assertIn("usage endpoint left alone", reason)
+        self.assertIn("headers probe answered HTTP 500", reason)
+        out = self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="403")
+        self.assertIn("usage endpoint answered HTTP 403", json.loads(out.stdout)["reason"])
+
+    def test_no_file_the_guard_writes_holds_the_token(self):
+        self.refused("403")
+        self.curl_run(FAKE_OAUTH_CODE="429", FAKE_CODE="429",
+                      FAKE_HEADERS="HTTP/1.1 429\r\nretry-after: 600\r\n\r\n")
+        # curl.log is the stub's own record of its arguments, not the guard's.
+        files = [f for f in self.home.iterdir() if f.is_file() and f.name != "curl.log"]
+        self.assertTrue(files)
+        for f in files:
+            self.assertNotIn("test-token", f.read_text(), f.name)
+            self.assertNotIn("test-tok", f.read_text(), f.name)
 
     def test_the_source_can_be_pinned_to_the_headers(self):
         out = self.curl_run("--check", USAGE_GUARD_SOURCE="headers",

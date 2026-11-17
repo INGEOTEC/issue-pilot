@@ -30,19 +30,25 @@
 #     the endpoint above.  It costs one real (1-output-token, Haiku) request per
 #     check; that is a rounding error against the window it is protecting.
 #
-# In the default `auto` the first is tried and a 401/403 falls back to the
-# second in the same run; `headers` and `oauth` pin one of them.  Both print the
-# same '<window> <percent> <seconds-until-reset>' lines, so the decision below
-# is shared whatever produced the reading.
+# In the default `auto` the first is tried and a 401, 403 or 429 from it falls
+# back to the second in the same run; `headers` and `oauth` pin one of them.
+# The endpoint is then left alone -- for a day after a 401/403 (the token's scope
+# does not change while it is the same token; USAGE_GUARD_OAUTH_RETRY), for its
+# own retry-after after a 429 -- in a record of its own (usage-guard.oauth-skip),
+# keyed by a fingerprint of the token, and kept apart from the backoff of the
+# headers probe: one endpoint being refused says nothing about the other.  Both
+# print the same '<window> <percent> <seconds-until-reset>' lines, so the
+# decision below is shared whatever produced the reading.
 #
 # Modes:
 #   usage-guard.sh            hook mode: measure, then wait or halt
 #   usage-guard.sh --check    probe now regardless of the interval, print one JSON
 #                             object -- the readings, where they came from, the
 #                             verdict hook mode would
-#                             reach on each, the thresholds and any halt on
-#                             record -- never sleep, never block (used by the run
-#                             driver, /issue-pilot:status and /issue-pilot:usage)
+#                             reach on each, the thresholds, any halt on record
+#                             and, when nothing could be read, the reason --
+#                             never sleep, never block (used by the run driver,
+#                             /issue-pilot:status and /issue-pilot:usage)
 #   usage-guard.sh --clear    forget a recorded halt
 
 set -uo pipefail
@@ -53,13 +59,16 @@ LONG_ACTION="${USAGE_GUARD_LONG_ACTION:-halt}"    # halt | warn | ignore
 CHECK_INTERVAL="${USAGE_GUARD_INTERVAL:-300}"     # seconds between real checks
 MAX_WAIT="${USAGE_GUARD_MAX_WAIT:-21600}"         # longest single sleep (6 h)
 SOURCE_MODE="${USAGE_GUARD_SOURCE:-auto}"         # auto | headers | oauth
+OAUTH_RETRY="${USAGE_GUARD_OAUTH_RETRY:-86400}"   # seconds to leave the usage endpoint alone after a 401/403
+case "$OAUTH_RETRY" in ''|*[!0-9]*) OAUTH_RETRY=86400 ;; esac
 PROBE_MODEL="${USAGE_GUARD_MODEL:-claude-haiku-4-5-20251001}"
 API="${USAGE_GUARD_API:-https://api.anthropic.com}"
 
 PILOT_HOME="${ISSUE_PILOT_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/issue-pilot}"
 CREDS="$HOME/.claude/.credentials.json"
 STATE="$PILOT_HOME/usage-guard.state"
-BACKOFF="$PILOT_HOME/usage-guard.backoff"
+BACKOFF="$PILOT_HOME/usage-guard.backoff"          # the headers probe's own 429
+OAUTH_SKIP="$PILOT_HOME/usage-guard.oauth-skip"    # the usage endpoint's refusal
 HALT="$PILOT_HOME/usage-guard.halt"
 LOG="$PILOT_HOME/usage-guard.log"
 mkdir -p "$PILOT_HOME" 2>/dev/null || true
@@ -154,9 +163,11 @@ if [ -z "$token" ]; then
   exit 0
 fi
 
-# A 429 asks for a retry-after measured in tens of minutes.  Probing straight
-# through it (this hook fires from every session) just wastes calls, so park
-# every session until the header says we are welcome back.
+# A 429 from /v1/messages asks for a retry-after measured in tens of minutes.
+# Probing straight through it (this hook fires from every session) just wastes
+# calls, so park every session until the header says we are welcome back.  Only
+# the headers probe writes this file: a refusal of the usage endpoint is kept in
+# OAUTH_SKIP, because it must not park the reading that does work.
 if [ "$MODE" = hook ] && [ -r "$BACKOFF" ]; then
   until=$(cat "$BACKOFF" 2>/dev/null || echo 0)
   case "$until" in ''|*[!0-9]*) until=0 ;; esac
@@ -164,12 +175,43 @@ if [ "$MODE" = hook ] && [ -r "$BACKOFF" ]; then
 fi
 
 # Which reading produced the answer cannot be a plain variable -- the readers run
-# in a subshell -- so they leave its name here: oauth_usage or headers.
-SRC_FILE=$(mktemp 2>/dev/null) && trap 'rm -f "$SRC_FILE"' EXIT || SRC_FILE=/dev/null
+# in a subshell -- so they leave its name here: oauth_usage or headers.  The same
+# device carries, one line per refusal, why there was no reading at all.
+SRC_FILE=$(mktemp 2>/dev/null) || SRC_FILE=/dev/null
+REASON_FILE=$(mktemp 2>/dev/null) || REASON_FILE=/dev/null
+# Never `rm` the /dev/null fallback.
+trap '[ "$SRC_FILE" = /dev/null ] || rm -f "$SRC_FILE"; [ "$REASON_FILE" = /dev/null ] || rm -f "$REASON_FILE"' EXIT
+why() { printf '%s\n' "$*" >>"$REASON_FILE"; }
+
+# A short fingerprint of the token, for OAUTH_SKIP: the first 12 hex digits of its
+# sha256 -- never the token, nor a prefix of it.  The token goes in through the
+# environment so that it is on no command line.  Empty when it cannot be
+# computed, and then no record is written or believed.
+FINGERPRINT=$(GUARD_TOKEN="$token" python3 -c "
+import hashlib, os
+print(hashlib.sha256(os.environ['GUARD_TOKEN'].encode()).hexdigest()[:12])
+" 2>/dev/null) || FINGERPRINT=""
+
+# '<epoch> <fingerprint>': do not call /api/oauth/usage with this token before
+# that time.  Unreadable, malformed or someone else's token counts as no record.
+oauth_skip_until() {
+  local until fp
+  [ -n "$FINGERPRINT" ] && [ -r "$OAUTH_SKIP" ] || { echo 0; return 0; }
+  read -r until fp <"$OAUTH_SKIP" 2>/dev/null || true
+  case "${until:-}" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  [ "${fp:-}" = "$FINGERPRINT" ] || { echo 0; return 0; }
+  echo "$until"
+}
+oauth_skip_set() {   # seconds
+  [ "$SOURCE_MODE" = oauth ] && return 0
+  [ -n "$FINGERPRINT" ] || return 0
+  printf '%s %s\n' "$(( now + $1 ))" "$FINGERPRINT" >"$OAUTH_SKIP" 2>/dev/null || true
+}
 
 # ------------------------------------------------------------------- the probe
 # Prints one line per window: '<name> <percent> <seconds-until-reset>'.
-# On 429 it records the backoff and prints nothing.
+# On 429 it records the backoff and prints nothing; whatever else goes wrong it
+# prints nothing and says why.
 probe() {
   local hdr code retry
   hdr=$(mktemp) || return 0
@@ -186,13 +228,15 @@ probe() {
     retry=$(grep -i '^retry-after:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | awk '{print $2}')
     case "${retry:-}" in ''|*[!0-9]*) retry=1800 ;; esac
     echo "$(( now + retry ))" >"$BACKOFF"
-    log "rate limited (429); not probing again for ${retry}s"
+    log "headers probe rate limited (429); not probing again for ${retry}s"
+    why "headers probe rate limited (HTTP 429), retry in ${retry}s"
     rm -f "$hdr"
     return 0
   fi
 
   if [ "$code" != "200" ]; then
-    log "probe answered HTTP $code; letting the call through"
+    log "headers probe answered HTTP ${code:-none}; letting the call through"
+    why "headers probe answered HTTP ${code:-none}"
     rm -f "$hdr"
     return 0
   fi
@@ -233,9 +277,11 @@ for key, value in sorted(h.items()):
 
 # The other reading: GET /api/oauth/usage, free, but only for a token with the
 # `user:profile` scope.  Prints the very lines probe() prints, so classify()
-# and everything after it are shared.  Returns 10 when the token cannot use the
-# endpoint (401/403) so that `auto` can fall back to the header probe; prints
-# nothing, and returns 0, for every other way of not getting a reading.
+# and everything after it are shared.  Prints
+# nothing, and returns 0, for every other way of not getting a reading.  Returns
+# 10 -- the usage endpoint cannot give a reading, whatever else is true of the
+# headers -- for 401, 403 and 429 alike, and records that it is to be left alone
+# (see OAUTH_SKIP) unless the source is pinned to it.
 probe_oauth() {
   local body hdr code retry
   body=$(mktemp) || return 0
@@ -252,24 +298,27 @@ probe_oauth() {
     429)
       retry=$(grep -i '^retry-after:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | awk '{print $2}')
       case "${retry:-}" in ''|*[!0-9]*) retry=1800 ;; esac
-      echo "$(( now + retry ))" >"$BACKOFF"
-      log "rate limited (429); not probing again for ${retry}s"
+      oauth_skip_set "$retry"
+      log "usage endpoint rate limited (429); not asking it again for ${retry}s"
+      why "usage endpoint rate limited (HTTP 429), retry in ${retry}s"
       rm -f "$body" "$hdr"
-      return 0
+      return 10
       ;;
     401|403)
-      [ "$SOURCE_MODE" = oauth ] && log "usage endpoint answered HTTP $code; letting the call through"
+      oauth_skip_set "$OAUTH_RETRY"
+      log "usage endpoint answered HTTP $code; not asking it again for ${OAUTH_RETRY}s"
+      why "usage endpoint answered HTTP $code (this token cannot read it)"
       rm -f "$body" "$hdr"
       return 10
       ;;
     *)
       log "usage endpoint answered HTTP ${code:-none}; letting the call through"
+      why "usage endpoint answered HTTP ${code:-none}"
       rm -f "$body" "$hdr"
       return 0
       ;;
   esac
 
-  rm -f "$BACKOFF"
   # limits[] is the primary source: every entry with a numeric percent and a
   # parseable reset is a window, active or not.  Without it, fall back to the
   # top-level objects that carry both a utilization and a resets_at.  Both are
@@ -346,22 +395,32 @@ for name, (pct, left) in found.items():
     print('%s %d %d' % (name, pct, left))
 " "$body" 2>/dev/null; then
     echo oauth_usage >"$SRC_FILE"
+    [ "$SOURCE_MODE" = oauth ] || rm -f "$OAUTH_SKIP"
   else
     log "usage endpoint answered 200 but with nothing readable; letting the call through"
+    why "usage endpoint answered HTTP 200 with nothing readable"
   fi
   rm -f "$body" "$hdr"
 }
 
 # Whichever reading USAGE_GUARD_SOURCE asks for, same output as probe().
 measure() {
-  local rc
-  : >"$SRC_FILE"
+  local rc skip
+  : >"$SRC_FILE"; : >"$REASON_FILE"
   case "$SOURCE_MODE" in
     headers) probe ;;
     oauth)   probe_oauth ;;
     *)
-      probe_oauth; rc=$?
-      [ "$rc" -eq 10 ] && probe
+      # A usage endpoint that refused this token is not asked again until its
+      # record runs out -- from hook mode or --check alike.
+      skip=$(oauth_skip_until)
+      if (( now < skip )); then
+        why "usage endpoint left alone for another $(( skip - now ))s after an earlier refusal"
+        probe
+      else
+        probe_oauth; rc=$?
+        [ "$rc" -eq 10 ] && probe
+      fi
       ;;
   esac
   return 0
@@ -415,7 +474,8 @@ classify() {
 if [ "$MODE" = check ]; then
   readings="$(measure)"
   SOURCE="$(cat "$SRC_FILE" 2>/dev/null)"
-  classify <<<"$readings" | SOURCE="$SOURCE" THRESHOLD="$THRESHOLD" LONG_THRESHOLD="$LONG_THRESHOLD" \
+  REASON="$(paste -sd';' "$REASON_FILE" 2>/dev/null | sed 's/;/; /g')"
+  classify <<<"$readings" | SOURCE="$SOURCE" REASON="$REASON" THRESHOLD="$THRESHOLD" LONG_THRESHOLD="$LONG_THRESHOLD" \
     LONG_ACTION="$LONG_ACTION" MAX_WAIT="$MAX_WAIT" HALT="$HALT" python3 -c "
 import json, os, sys
 windows = []
@@ -439,6 +499,7 @@ print(json.dumps({
                    'max_wait': int(os.environ['MAX_WAIT'])},
     'windows': windows,
     'halt': halt,
+    'reason': (os.environ.get('REASON') or None) if not windows else None,
 }, indent=2))
 "
   exit 0
