@@ -114,6 +114,17 @@ gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; ru
 # green means, so it is decided once, in writing, before anything starts.
 python3 "$CONFIG" check >/dev/null || exit 78
 
+# The per-issue sessions (first attempts of --resume and --fix included) are
+# started from a prompt file the driver owns, not from a slash command: nobody
+# types it, so it is not shipped in commands/.  Look for it now, before the run
+# state is created or touched, so a broken install fails here and not on the
+# first issue.  --plan-only starts no session and does not need it.
+ITEM_PROMPT="$SCRIPTS/prompts/one.md"
+if [[ $PLAN_ONLY -eq 0 && ! -f "$ITEM_PROMPT" ]]; then
+  echo "error: the per-issue prompt $ITEM_PROMPT is missing; reinstall issue-pilot." >&2
+  exit 78
+fi
+
 # --------------------------------------------------------------- authentication
 # Every issue runs in a `claude` subprocess, which needs credentials of its own.
 # Two ways those go missing even though you are logged in: CLAUDE_CODE_OAUTH_TOKEN
@@ -570,7 +581,14 @@ while next_json=$(python3 "$STATE" next); do
     before="$(fingerprint)"
 
     if [[ $attempt -eq 1 ]]; then
-      prompt="/issue-pilot:one $issue"
+      # The first line of the file is "issue-pilot item: {{ITEM}}"; substitute
+      # with parameter expansion, not sed: ROOT is a path and may hold
+      # characters special to a sed replacement.
+      # (bash 5.2 also makes `&` special in a replacement; switch that off.)
+      shopt -u patsub_replacement 2>/dev/null || true
+      prompt="$(cat "$ITEM_PROMPT")"
+      prompt="${prompt//\{\{ITEM\}\}/$issue}"
+      prompt="${prompt//\{\{ROOT\}\}/$ROOT}"
     else
       # A session that exits with the issue still pending has almost always
       # ended its turn while work was in flight, not hit a real blocker: the
@@ -614,7 +632,8 @@ EOF
     # No `|| true`: keep the exit code, and keep a log, so a dead run can be
     # read afterwards instead of guessed at.
     rc=0
-    claude -p "$prompt" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits "${session_args[@]}" \
+    claude -p "$prompt" "${CLAUDE_ARGS[@]}" --permission-mode acceptEdits \
+      --allowedTools "Bash Read Edit Write Glob Grep" "${session_args[@]}" \
       --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$log" || rc=$?
     echo "--- claude exited with status $rc (session ${session_args[1]})" | tee -a "$log"
 

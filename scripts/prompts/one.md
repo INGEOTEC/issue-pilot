@@ -1,10 +1,6 @@
----
-description: Implement ONE issue of an issue-pilot run, in a possibly clean conversation
-argument-hint: <issue number | fix-k>
-allowed-tools: Bash, Read, Edit, Write, Glob, Grep
----
+issue-pilot item: {{ITEM}}
 
-Implement **one single** issue of the run in progress: $ARGUMENTS
+Implement **one single** issue of the run in progress: {{ITEM}}
 
 This conversation may have just been cleared (`/clear`): do not assume you
 remember anything about the previous issues. All the context of the run is in
@@ -42,8 +38,8 @@ So:
    dependencies):
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" show
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" next
+   python3 "{{ROOT}}/scripts/issues_state.py" show
+   python3 "{{ROOT}}/scripts/issues_state.py" next
    ```
 
    The issue you are given is the one `next` reports. If `next` reports a
@@ -71,7 +67,7 @@ So:
    included. The command comes from the project's configuration:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get test_command
+   python3 "{{ROOT}}/scripts/pilot_config.py" get test_command
    ```
 
    If that prints nothing, work the command out from the project itself
@@ -84,7 +80,7 @@ So:
    tests and their result, defaults you decided), and mark the issue finished:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" done <n> --commit "$(git rev-parse HEAD)"
+   python3 "{{ROOT}}/scripts/issues_state.py" done <n> --commit "$(git rev-parse HEAD)"
    ```
 
    Marking it `done` is the last step and it is mandatory: the driver only moves
@@ -95,7 +91,7 @@ So:
    and mark it explicitly:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_state.py" block <n> --reason '...'
+   python3 "{{ROOT}}/scripts/issues_state.py" block <n> --reason '...'
    ```
 
    Marking it `block` stops the run deliberately and without retries, so use it

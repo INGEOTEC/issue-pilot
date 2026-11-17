@@ -6,6 +6,25 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-17
+
+### Removed
+
+- `/issue-pilot:one` is no longer a command. Nobody typed it (0 times in a month
+  of real use) while the driver launched it for every item (34 times), so it was
+  only noise in the `/` menu and in the skill list of every session. Its prompt
+  now lives in `scripts/prompts/one.md`, the driver reads it and fills in the
+  item (`{{ITEM}}`) and the plugin root (`{{ROOT}}`) itself, and `install.sh`
+  removes the old `one.md` command from an earlier install. Nothing changes for
+  anyone who only used `run`.
+
+### Changed
+
+- The per-issue `claude -p` sessions (first attempts and retries alike) are now
+  started with an explicit `--allowedTools "Bash Read Edit Write Glob Grep"`,
+  which is what the command's frontmatter used to grant. The driver refuses to
+  start, before touching the run state, when the prompt file is missing.
+
 ## [0.5.4] - 2026-11-10
 
 ### Changed

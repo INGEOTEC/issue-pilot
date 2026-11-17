@@ -135,7 +135,7 @@ starting; the wait below is right then.)
 
 The driver syncs the base branch with origin once more, exactly as step 1 did,
 and cuts the run branch from it right before the first
-`/issue-pilot:one` — never from whatever happens to be checked out. The
+per-issue session — never from whatever happens to be checked out. The
 base branch comes from `.issue-pilot.json` or from the repository's default
 branch on GitHub; do not guess it yourself, and do not pass `--from-head`
 unless the user explicitly asks to start from the local checkout.
@@ -212,7 +212,8 @@ yourself. If it says there is no detached driver, say so and stop.
   independent ones, resuming the run's own conversation by id for the dependent
   ones — never "the most recent conversation in this directory", which during a
   run is whichever one you opened last. For each issue it
-  invokes `/issue-pilot:one <n>`, which implements, tests, commits and
+  starts a session on the driver's own per-issue prompt
+  (`scripts/prompts/one.md`), which implements, tests, commits and
   comments on the issue. It only moves on when the issue is `done`.
 
 - **The model.** Every autonomous session runs on the model and effort level in

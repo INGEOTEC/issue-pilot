@@ -56,6 +56,15 @@ class Install(unittest.TestCase):
         # the /var -> /private/var symlink, so resolve the expected side too.
         self.assertEqual(out.stdout.splitlines()[1], str(lib.resolve()))
 
+    def test_the_per_issue_prompt_ships_in_lib_and_is_not_a_command(self):
+        # The per-issue prompt is not a command any more: the driver reads its
+        # prompt from scripts/prompts/, which the installer copies with scripts/.
+        self.install()
+        self.assertTrue((self.pilot_home / "lib" / "scripts" / "prompts" / "one.md").is_file())
+        commands = pathlib.Path(self.env["CLAUDE_CONFIG_DIR"]) / "commands" / "issue-pilot"
+        self.assertTrue((commands / "run.md").is_file())
+        self.assertFalse((commands / "one.md").exists())
+
     def test_reinstalling_leaves_exactly_one_manifest(self):
         self.install()
         self.install()
