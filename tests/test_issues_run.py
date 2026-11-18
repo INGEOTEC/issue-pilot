@@ -8,6 +8,7 @@ refuses to start.
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
@@ -315,6 +316,72 @@ class Run(PilotTestCase):
         self.assertFalse(list(self.home.glob("state/issues-run-*.json")))
         self.assertEqual(self.claude_calls(), [])
 
+    def prompt_of(self, call):
+        return call[call.index("-p") + 1]
+
+    def test_the_first_attempt_prompt_is_the_driver_owned_one_filled_in(self):
+        # The per-issue prompt is a file of the driver's, not a slash command:
+        # it must name the item, carry no placeholder Claude Code would have
+        # expanded, and point at scripts that exist.
+        self.run_driver("--no-interview", "1", check=True)
+        prompt = self.prompt_of(self.claude_calls()[0])
+        self.assertFalse(prompt.startswith("/"))
+        self.assertEqual(prompt.splitlines()[0], "issue-pilot item: 1")
+        self.assertNotIn("{{", prompt)
+        self.assertNotIn("$ARGUMENTS", prompt)
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", prompt)
+        state_py = pathlib.Path(SCRIPTS / "issues_state.py")
+        self.assertIn('python3 "%s"' % state_py, prompt)
+        self.assertTrue(state_py.exists())
+
+    def test_the_root_is_substituted_literally_even_with_special_characters(self):
+        # A copy of the toolkit under a path with characters that are special
+        # to sed (and to bash 5.2 replacements): `&` and `|`.
+        plugin = self.repo.parent / "we&ird|dir"
+        shutil.copytree(SCRIPTS, plugin / "scripts",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(SCRIPTS.parent / "hooks", plugin / "hooks")
+        out = subprocess.run(
+            ["bash", str(plugin / "scripts" / "issues_run.sh"), "--no-interview", "1"],
+            cwd=self.repo, capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        prompt = self.prompt_of(self.claude_calls()[0])
+        self.assertIn('python3 "%s/scripts/issues_state.py"' % plugin, prompt)
+        self.assertNotIn("{{", prompt)
+
+    def test_every_per_issue_invocation_pre_approves_the_tools(self):
+        # What the command's frontmatter used to grant -- on first attempts and
+        # on retries, which never went through the command.
+        self.run_driver("--no-interview", "1", env=self.plan("touch", "done"),
+                        check=True)
+        first, second = self.claude_calls()
+        for call in (first, second):
+            tools = call[call.index("--allowedTools") + 1]
+            self.assertEqual(sorted(tools.split()),
+                             ["Bash", "Edit", "Glob", "Grep", "Read", "Write"])
+        self.assertNotEqual(self.prompt_of(first), self.prompt_of(second))
+        self.assertFalse(self.prompt_of(second).startswith("issue-pilot item:"))
+
+    def test_a_missing_prompt_file_stops_the_driver_before_the_state_exists(self):
+        plugin = self.repo.parent / "plugin-without-prompt"
+        shutil.copytree(SCRIPTS, plugin / "scripts",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(SCRIPTS.parent / "hooks", plugin / "hooks")
+        (plugin / "scripts" / "prompts" / "one.md").unlink()
+        for args in (["--no-interview", "1"], ["--resume"], ["--fix"]):
+            out = subprocess.run(
+                ["bash", str(plugin / "scripts" / "issues_run.sh"), *args],
+                cwd=self.repo, capture_output=True, text=True, env=self.env)
+            self.assertNotEqual(out.returncode, 0, args)
+            self.assertIn("one.md", out.stderr)
+            self.assertFalse(list(self.home.glob("state/issues-run-*.json")), args)
+            self.assertEqual(self.claude_calls(), [])
+        # --plan-only starts no session and does not need the file.
+        out = subprocess.run(
+            ["bash", str(plugin / "scripts" / "issues_run.sh"), "--plan-only", "1"],
+            cwd=self.repo, capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+
     def test_the_answers_gathered_beforehand_reach_the_run(self):
         notes = self.repo.parent / "notes.txt"
         notes.write_text("do not touch the parser\n")
@@ -515,7 +582,8 @@ class FixRuns(Run):
         out = self.run_driver("--fix", check=True)
         calls = self.claude_calls()
         self.assertEqual(len(calls), 1)
-        self.assertIn("/issue-pilot:one fix-1", calls[0][1])
+        prompt = calls[0][calls[0].index("-p") + 1]
+        self.assertEqual(prompt.splitlines()[0], "issue-pilot item: fix-1")
         self.assertEqual(self.session_of(calls[0]), ("--resume", session))
         self.assertEqual(self.state()["status"]["fix-1"], "done")
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "issues-1")

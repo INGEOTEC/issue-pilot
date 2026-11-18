@@ -59,6 +59,10 @@ for f in "$SRC"/commands/*.md; do
   sed "s|\${CLAUDE_PLUGIN_ROOT}|$LIB|g" "$f" > "$COMMANDS/$(basename "$f")"
 done
 
+# An earlier version shipped the per-issue prompt as a command; it is a prompt
+# file under scripts/prompts/ now, so do not leave the old command behind.
+rm -f "$COMMANDS/one.md"
+
 echo "installed:"
 echo "  toolkit  -> $LIB"
 echo "  commands -> $COMMANDS  (/issue-pilot:run, /issue-pilot:plan, ...)"

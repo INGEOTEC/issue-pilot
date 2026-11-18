@@ -33,6 +33,8 @@ about it right now.
    - `source` — `oauth_usage`, `headers`, or `null`.
    - `thresholds` — the limits the verdicts were reached under.
    - `halt` — the text of a halt already on record, or `null`.
+   - `reason` — `null` when there is a reading; otherwise one sentence naming
+     the endpoint that refused and the HTTP status.
 
    Report each window by its name, its percentage, how long until it resets as
    `Xh Ym`, and what the guard would do with it:
@@ -59,9 +61,9 @@ about it right now.
 
 4. When the output is `{"error": ...}`, say the guard cannot measure right now
    and that it therefore lets every tool call through: a run is unprotected,
-   not blocked. When `windows` is empty with no error, the probe returned
-   nothing usable (rate limited or an unexpected answer) and the guard likewise
-   lets calls through.
+   not blocked. When `windows` is empty with no error, report the `reason` the
+   guard gave, as it is (it names the endpoint and the status), instead of a
+   generic sentence, and say the guard likewise lets calls through.
 
 This command is read-only. Do not modify anything, do not run the hook (no
 argument), do not clear a halt, and do not start, resume or stop a run.

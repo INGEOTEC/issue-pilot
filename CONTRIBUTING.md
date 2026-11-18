@@ -54,9 +54,11 @@ issue-pilot@ingeotec` again, then restart Claude Code.
 The files in `commands/` are prompts, and they are the only instructions an
 unattended session gets. Two habits pay off there:
 
-- Say *why*, not just what. Several of the rules in `one.md` exist
-  because a run died; the reason is what keeps a later editor from removing
-  them.
+- Say *why*, not just what. Several of the rules in `scripts/prompts/one.md`
+  exist because a run died; the reason is what keeps a later editor from
+  removing them. That file is a prompt too, but not a command: the driver reads
+  it and fills in `{{ITEM}}` and `{{ROOT}}` itself, so it uses those instead of
+  `$ARGUMENTS` and `${CLAUDE_PLUGIN_ROOT}`.
 - Refer to scripts as `${CLAUDE_PLUGIN_ROOT}/scripts/...`. `install.sh` rewrites
   that to an absolute path for people who install without the plugin system, and
   a hardcoded path breaks one of the two installations.
