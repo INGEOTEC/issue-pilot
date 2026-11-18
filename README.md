@@ -370,7 +370,9 @@ probe when it has to. The endpoint is then left alone: for a day after a 401/403
 never the token, so logging in differently takes effect at once; it is kept
 apart from the backoff that a 429 from the headers probe itself causes
 (`usage-guard.backoff`), because one endpoint being refused says nothing about
-the other. Both readings feed the same decision.
+the other. Pinned to `oauth` there is no other reading, so a 429 from the usage
+endpoint is backed off in `usage-guard.backoff` like one from the headers probe.
+Both readings feed the same decision.
 
 The token comes from, in order: `CLAUDE_CODE_OAUTH_TOKEN`, an `export` of it in
 `~/.bashrc`, `~/.zshrc` or `~/.profile`, `~/.claude/.credentials.json`, and — on

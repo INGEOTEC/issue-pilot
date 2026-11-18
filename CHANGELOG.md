@@ -19,7 +19,8 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   token) and is left alone for a day after a 401/403
   (`USAGE_GUARD_OAUTH_RETRY`) or for its `retry-after` after a 429, in hook mode
   and in `--check`, so the guard stops asking it every five minutes, which is
-  what kept it rate limited. `USAGE_GUARD_SOURCE=oauth` still asks it on purpose.
+  what kept it rate limited. `USAGE_GUARD_SOURCE=oauth` still asks it on purpose, and,
+  having no other reading, still backs off on a 429 in `usage-guard.backoff`.
 - `usage-guard.sh --check` has a `reason` key saying why nothing was read, and
   `/issue-pilot:usage` reports it. The log names the endpoint (`usage endpoint
   rate limited (429)` versus `headers probe rate limited (429)`).

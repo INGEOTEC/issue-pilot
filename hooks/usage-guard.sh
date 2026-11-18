@@ -67,7 +67,7 @@ API="${USAGE_GUARD_API:-https://api.anthropic.com}"
 PILOT_HOME="${ISSUE_PILOT_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/issue-pilot}"
 CREDS="$HOME/.claude/.credentials.json"
 STATE="$PILOT_HOME/usage-guard.state"
-BACKOFF="$PILOT_HOME/usage-guard.backoff"          # the headers probe's own 429
+BACKOFF="$PILOT_HOME/usage-guard.backoff"          # a 429 of the headers probe (or of the usage endpoint when pinned)
 OAUTH_SKIP="$PILOT_HOME/usage-guard.oauth-skip"    # the usage endpoint's refusal
 HALT="$PILOT_HOME/usage-guard.halt"
 LOG="$PILOT_HOME/usage-guard.log"
@@ -165,9 +165,11 @@ fi
 
 # A 429 from /v1/messages asks for a retry-after measured in tens of minutes.
 # Probing straight through it (this hook fires from every session) just wastes
-# calls, so park every session until the header says we are welcome back.  Only
-# the headers probe writes this file: a refusal of the usage endpoint is kept in
-# OAUTH_SKIP, because it must not park the reading that does work.
+# calls, so park every session until the header says we are welcome back.  The
+# headers probe writes this file; in `auto` a refusal of the usage endpoint is
+# kept in OAUTH_SKIP instead, because it must not park the reading that does
+# work.  Pinned with USAGE_GUARD_SOURCE=oauth the usage endpoint writes it too
+# (on a 429), because then it is the only reading there is.
 if [ "$MODE" = hook ] && [ -r "$BACKOFF" ]; then
   until=$(cat "$BACKOFF" 2>/dev/null || echo 0)
   case "$until" in ''|*[!0-9]*) until=0 ;; esac
@@ -281,7 +283,9 @@ for key, value in sorted(h.items()):
 # nothing, and returns 0, for every other way of not getting a reading.  Returns
 # 10 -- the usage endpoint cannot give a reading, whatever else is true of the
 # headers -- for 401, 403 and 429 alike, and records that it is to be left alone
-# (see OAUTH_SKIP) unless the source is pinned to it.
+# (see OAUTH_SKIP) unless the source is pinned to it; pinned, there is no other
+# reading to fall back to, so a 429 goes to BACKOFF instead.
+# (Review fix-1, found after issue 32: pinned `oauth` mode lost its backoff.)
 probe_oauth() {
   local body hdr code retry
   body=$(mktemp) || return 0
@@ -298,15 +302,26 @@ probe_oauth() {
     429)
       retry=$(grep -i '^retry-after:' "$hdr" 2>/dev/null | tail -1 | tr -d '\r' | awk '{print $2}')
       case "${retry:-}" in ''|*[!0-9]*) retry=1800 ;; esac
-      oauth_skip_set "$retry"
-      log "usage endpoint rate limited (429); not asking it again for ${retry}s"
+      if [ "$SOURCE_MODE" = oauth ]; then
+        # Pinned to this endpoint there is no other reading to fall back to,
+        # so its 429 parks the guard, as a 429 from the headers probe does.
+        echo "$(( now + retry ))" >"$BACKOFF"
+        log "usage endpoint rate limited (429); not probing again for ${retry}s"
+      else
+        oauth_skip_set "$retry"
+        log "usage endpoint rate limited (429); not asking it again for ${retry}s"
+      fi
       why "usage endpoint rate limited (HTTP 429), retry in ${retry}s"
       rm -f "$body" "$hdr"
       return 10
       ;;
     401|403)
-      oauth_skip_set "$OAUTH_RETRY"
-      log "usage endpoint answered HTTP $code; not asking it again for ${OAUTH_RETRY}s"
+      if [ "$SOURCE_MODE" = oauth ]; then
+        log "usage endpoint answered HTTP $code; letting the call through"
+      else
+        oauth_skip_set "$OAUTH_RETRY"
+        log "usage endpoint answered HTTP $code; not asking it again for ${OAUTH_RETRY}s"
+      fi
       why "usage endpoint answered HTTP $code (this token cannot read it)"
       rm -f "$body" "$hdr"
       return 10
@@ -395,6 +410,7 @@ for name, (pct, left) in found.items():
     print('%s %d %d' % (name, pct, left))
 " "$body" 2>/dev/null; then
     echo oauth_usage >"$SRC_FILE"
+    rm -f "$BACKOFF"
     [ "$SOURCE_MODE" = oauth ] || rm -f "$OAUTH_SKIP"
   else
     log "usage endpoint answered 200 but with nothing readable; letting the call through"

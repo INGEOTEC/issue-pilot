@@ -475,6 +475,42 @@ class UsageGuard(PilotTestCase):
         self.assertEqual(self.curl_calls(), ["oauth"])
         self.assertEqual(self.skip_file.read_text(), record)
 
+    # Review fix-1 (found after issue 32): pinned to the usage endpoint there is no
+    # other reading, so its 429 still parks the guard.
+    def test_a_pinned_oauth_source_backs_off_on_a_429(self):
+        import time
+        env = dict(USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="429",
+                   FAKE_OAUTH_HEADERS="HTTP/1.1 429\r\nretry-after: 600\r\n\r\n")
+        out = self.curl_run(**env)
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(self.curl_calls(), ["oauth"])
+        until = int(self.backoff_file.read_text())
+        self.assertTrue(abs(until - (time.time() + 600)) <= 10)
+        self.assertFalse(self.skip_file.exists())
+        log = (self.home / "usage-guard.log").read_text()
+        self.assertIn("usage endpoint rate limited (429); not probing again for 600s", log)
+        self.assertNotIn("not asking it again", log)
+        self.forget_calls()
+        self.assertEqual(self.curl_run(**env).returncode, 0)
+        self.assertEqual(self.curl_calls(), [])
+
+    def test_a_pinned_oauth_source_does_not_claim_to_remember_a_403(self):
+        out = self.curl_run(USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="403")
+        self.assertEqual(out.returncode, 0)
+        log = (self.home / "usage-guard.log").read_text()
+        self.assertIn("usage endpoint answered HTTP 403; letting the call through", log)
+        self.assertNotIn("not asking it again", log)
+        self.assertFalse(self.backoff_file.exists())
+        self.assertFalse(self.skip_file.exists())
+
+    def test_a_readable_usage_answer_clears_the_backoff(self):
+        import time
+        self.backoff_file.write_text(str(int(time.time()) + 3600))
+        out = self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="200",
+                            FAKE_OAUTH_BODY=self.oauth_body())
+        self.assertEqual(json.loads(out.stdout)["source"], "oauth_usage")
+        self.assertFalse(self.backoff_file.exists())
+
     def test_a_pinned_oauth_source_does_not_write_a_record(self):
         self.curl_run("--check", USAGE_GUARD_SOURCE="oauth", FAKE_OAUTH_CODE="429")
         self.assertFalse(self.skip_file.exists())
