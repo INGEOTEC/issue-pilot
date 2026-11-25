@@ -515,6 +515,10 @@ class Run(PilotTestCase):
         report = self.run_script("issues_state.py", "report").stdout
         self.assertIn("issues-1-2", report)
         self.assertNotIn("issues-9", report)
+        # The driver may still be going.  Let it finish before the temporary
+        # repository is removed: a driver still writing git objects under it
+        # makes the cleanup fail with "Directory not empty" every so often.
+        self.wait_for_exit(self.pointer()["pid"], self.home / "logs" / "issues-1-2")
 
     def test_a_detach_whose_driver_dies_before_initialising_fails(self):
         self._git("remote", "set-url", "origin", "/nonexistent")
