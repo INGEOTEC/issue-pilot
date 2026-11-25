@@ -147,16 +147,17 @@ Write `.issue-pilot.json` at the repository root, pretty-printed, with
 `landing` too, `issues_dir` when the tracker is local, plus any other setting that
 differs from its default. `model` and `effort` are written even
 when they are the defaults: the file should say what the runs use, not leave it
-to the plugin's defaults, which can change between versions. Then prove it is
-valid:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" check
-```
+to the plugin's defaults, which can change between versions.
 
 When the tracker is local, make the directory with `mkdir -p <issues_dir>`, and
 when the issues are to be kept out of git run
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" exclude <issues_dir>/`.
+
+Then prove it is valid:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" check
+```
 
 If that reports a problem, fix it and check again. Do not report success on an
 unchecked file.

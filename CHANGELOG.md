@@ -31,7 +31,8 @@ the sessions run.
   or fast-forwarding locally when there is no remote; the run branch itself is
   never pushed); `push` pushes the run branch; `branch` leaves it for you to
   merge. Local issues are closed on the run branch before it lands, GitHub
-  issues are closed by the script for `merge`. Nothing is rebased or
+  issues are closed by the script for `merge` (and when that fails,
+  `/issue-pilot:close` finishes them). Nothing is rebased or
   force-pushed.
 - `/issue-pilot:init` asks where issues live, how runs land, and whether the
   configuration file and the issues directory are versioned or ignored (two

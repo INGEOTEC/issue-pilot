@@ -101,6 +101,18 @@ class BaseSync(PilotTestCase):
         self.assertIn("could not fetch", out.stderr)
 
 
+class NoGh(PilotTestCase):
+    """No `gh` and no .issue-pilot.json: the situation of /issue-pilot:init's first step."""
+
+    def test_the_sync_works(self):
+        env = {**self.env, "PATH": self.path_without_gh()}
+        out = subprocess.run(["bash", str(HELPER)], cwd=self.repo, capture_output=True,
+                             text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertEqual(out.stdout.strip(), self.git("rev-parse", "main"))
+
+
 class NoRemote(PilotTestCase):
     """With no remote there is nothing to fetch: the local base branch is the reference."""
 

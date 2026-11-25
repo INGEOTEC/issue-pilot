@@ -159,6 +159,25 @@ class Local(PilotTestCase):
         self.write_issue("0001-x.md", "---\ntitle: nope\n# Heading\n")
         self.assertEqual(self.fetch(1)["title"], "Heading")
 
+    def test_a_horizontal_rule_is_not_a_header(self):
+        # Corrects a review finding (fix-1, found after the fact): any text
+        # between two `---` lines used to be taken for a header and lost.
+        original = "---\n\n# My title\n\ntext\n\n---\n\nmore text\n"
+        self.write_issue("5-hand.md", original)
+        fetched = self.fetch(5)
+        self.assertEqual((fetched["title"], fetched["state"]), ("My title", "open"))
+        self.assertIn("text", fetched["body"])
+        self.assertIn("more text", fetched["body"])
+        self.tracker("close", "5")
+        text = (self.dir / "5-hand.md").read_text()
+        self.assertTrue(text.endswith("\n---\n\n" + original))
+        self.assertRegex(text, r"^---\nnumber: 5\ntitle: My title\nstate: closed\nclosed: ")
+        self.assertEqual(self.fetch(5)["state"], "closed")
+
+    def test_a_real_header_with_blank_lines_and_crlf_is_still_one(self):
+        self.write_issue("6-x.md", "---\r\ntitle: Windows\r\n\r\nstate: open\r\n---\r\nbody\r\n")
+        self.assertEqual(self.fetch(6)["title"], "Windows")
+
     # -- comments ------------------------------------------------------------
 
     def test_a_comment_is_appended_and_the_body_is_left_alone(self):

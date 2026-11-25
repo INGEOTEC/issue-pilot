@@ -1000,6 +1000,22 @@ class IssuesGoThroughTheTracker(unittest.TestCase):
                       "the project is configured", text)
         self.assertIn("(local tracker, closed on this branch)", text)
 
+    def test_init_md_step_5_proves_validity_after_everything_is_written(self):
+        # Corrects a review finding (fix-1): "If that reports a problem" had come
+        # to follow the exclude command instead of the check.
+        text = self.text("commands/init.md")
+        step = text.split("## 5. Write it", 1)[1].split("## 6.", 1)[0]
+        order = [step.index(n) for n in (
+            "base_sync.sh", "exclude .issue-pilot.json", "Write `.issue-pilot.json`",
+            "mkdir -p <issues_dir>", "exclude <issues_dir>/", "pilot_config.py\" check",
+            "If that reports a problem")]
+        self.assertEqual(order, sorted(order))
+
+    def test_close_md_names_merge_in_step_2(self):
+        text = self.text("commands/close.md")
+        self.assertIn("`kind` is `merge`, `push` or `branch`", text)
+        self.assertIn("it is reached only when closing the issues failed at landing time", " ".join(text.split()))
+
     def test_close_md_works_for_every_landing_and_tracker(self):
         text = self.text("commands/close.md")
         self.assertNotIn("gh issue", text)

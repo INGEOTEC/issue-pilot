@@ -232,6 +232,23 @@ class RunLand(PilotTestCase):
         self.assertRegex(log[0]["body"], r"^Implemented in commit [0-9a-f]{40}, merged into main\.")
         self.assertTrue(self.state()["pull_request"]["closes_automatically"])
 
+    def test_a_github_issue_that_could_not_be_closed_leaves_the_record_open_for_close(self):
+        # Corrects a review finding (fix-1, found after the fact): the record
+        # claimed nothing was left to close even when closing had failed, so
+        # /issue-pilot:close, the way out the warning names, refused to act.
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\nif [ \"$1\" = issue ] && [ \"$2\" = close ]; then\n"
+                      "  echo 'cannot close' >&2; exit 1\nfi\nexec %s \"$@\"\n"
+                      % (SCRIPTS.parent / "tests" / "stubs" / "gh"))
+        self.start(landing="merge")
+        out = self.land()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("some issues could not be closed; /issue-pilot:close can do it", out.stderr)
+        record = self.state()["pull_request"]
+        self.assertEqual(record["kind"], "merge")
+        self.assertFalse(record["closes_automatically"])
+        self.assertEqual(self.origin_head(), self.git("rev-parse", "main"))
+
     def test_github_issues_are_left_open_for_push_and_branch(self):
         for landing in ("push", "branch"):
             with self.subTest(landing=landing):

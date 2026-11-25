@@ -309,6 +309,29 @@ class Hosting(PilotTestCase):
             self.no_gh_call()
 
 
+class NoGh(PilotTestCase):
+    """A machine that has never heard of GitHub must still get past base_sync.sh.
+
+    Corrects a review finding (fix-1, found after the fact): with the defaults
+    and no `gh` installed, the base-branch lookup was a traceback.
+    """
+
+    def run_without_gh(self, *args):
+        env = {"PATH": self.path_without_gh()}
+        return self.run_script("pilot_config.py", *args, env=env)
+
+    def test_the_base_branch_is_the_current_one(self):
+        self._git("checkout", "-q", "-b", "wip")
+        out = self.run_without_gh("base-branch")
+        self.assertEqual(out.stdout.strip(), "wip")
+        self.assertNotIn("Traceback", out.stderr)
+
+    def test_the_default_branch_is_empty(self):
+        out = self.run_without_gh("default-branch")
+        self.assertEqual((out.returncode, out.stdout), (0, "\n"))
+        self.assertNotIn("Traceback", out.stderr)
+
+
 class Exclude(PilotTestCase):
     def exclude(self, *paths, check=True):
         return self.run_script("pilot_config.py", "exclude", *paths, check=check)

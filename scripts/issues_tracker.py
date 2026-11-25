@@ -76,6 +76,7 @@ sys.path.insert(0, str(HERE))
 import pilot_config  # noqa: E402
 
 MARKER = re.compile(r"^<!-- issue-pilot:comment (\S+) -->$")
+HEADER_LINE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
 LEADING_DIGITS = re.compile(r"^(\d+)")
 SLUG_LENGTH = 50
 
@@ -261,8 +262,14 @@ def _parse(text):
     if lines[0].rstrip("\r") == "---":
         for i in range(1, len(lines)):
             if lines[i].rstrip("\r") == "---":
-                header = (1, i)
-                rest_from = i + 1
+                # Only `key: value` lines make a header.  A hand-written file may
+                # open with a horizontal rule and have another further down;
+                # what is between them is markdown, and taking it for a header
+                # would lose it from the body.  (Review fix-1.)
+                block = [l.rstrip("\r") for l in lines[1:i] if l.strip()]
+                if all(HEADER_LINE.match(l) for l in block):
+                    header = (1, i)
+                    rest_from = i + 1
                 break
     if header:
         for line in lines[header[0]:header[1]]:

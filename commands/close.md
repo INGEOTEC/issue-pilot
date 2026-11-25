@@ -38,8 +38,10 @@ and this is it.
      ```
 
      `state` has to be `MERGED`.
-   - `kind` is `push` or `branch`: `head` is the commit the run landed, and it
-     has to be in the base branch. When
+   - `kind` is `merge`, `push` or `branch`: `head` is the commit the run landed,
+     and it has to be in the base branch. For `merge` the check normally passes
+     at once, because the landing itself put `head` on the base; it is reached
+     only when closing the issues failed at landing time. When
      `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" remote` prints
      `origin`, run `git fetch origin <base>` first, then:
 
@@ -99,7 +101,7 @@ and this is it.
      git rev-list --count origin/<branch>..<branch>     # must print 0
      ```
 
-   - it was not pushed (`branch`): it is an ancestor of the base —
+   - it was not pushed (`merge`, `branch`): it is an ancestor of the base —
      `git merge-base --is-ancestor <branch> <base>`.
 
    Then `git branch -D <branch>`. `-D`, not `-d`: after a squash or rebase merge

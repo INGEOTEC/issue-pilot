@@ -254,6 +254,25 @@ def hosting(root=None) -> dict:
     return {"origin": origin, "github": origin and "github.com" in out.stdout}
 
 
+def _gh_default_branch(repo=None) -> str:
+    """The default branch GitHub reports, or "" when gh cannot say.
+
+    "Cannot say" includes gh not being installed: a machine that has never
+    heard of GitHub must still get past base_sync.sh on its way to
+    /issue-pilot:init, which is where it is told not to use GitHub.
+    (Review fix-1: before this, a missing `gh` was a traceback.)
+    """
+    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
+           "--jq", ".defaultBranchRef.name"]
+    if repo:
+        cmd[3:3] = [repo]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError:
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
 def default_branch(repo=None) -> str:
     """The repository's default branch on GitHub.
 
@@ -263,12 +282,7 @@ def default_branch(repo=None) -> str:
     """
     if not uses_github():
         return ""
-    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
-           "--jq", ".defaultBranchRef.name"]
-    if repo:
-        cmd[3:3] = [repo]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    return out.stdout.strip() if out.returncode == 0 else ""
+    return _gh_default_branch(repo)
 
 
 def resolve_base_branch(cfg=None, repo=None) -> str:
@@ -282,13 +296,9 @@ def resolve_base_branch(cfg=None, repo=None) -> str:
     if cfg.get("base_branch"):
         return cfg["base_branch"]
     if uses_github(cfg):
-        cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
-               "--jq", ".defaultBranchRef.name"]
-        if repo:
-            cmd[3:3] = [repo]
-        out = subprocess.run(cmd, capture_output=True, text=True)
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
+        found = _gh_default_branch(repo)
+        if found:
+            return found
     head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                           capture_output=True, text=True)
     return head.stdout.strip() or "main"

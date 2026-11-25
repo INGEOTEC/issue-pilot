@@ -83,6 +83,21 @@ class PilotTestCase(unittest.TestCase):
             if key.startswith("ISSUE_PILOT_") and key != "ISSUE_PILOT_HOME":
                 del self.env[key]
 
+    def path_without_gh(self):
+        """A PATH with the stubs, git, python3, bash and coreutils, and no `gh`."""
+        tools = pathlib.Path(self.tmp.name) / "tools-without-gh"
+        tools.mkdir(exist_ok=True)
+        for name in ("git", "python3", "bash", "env", "dirname", "sed", "grep", "cat",
+                     "awk", "date", "tr", "head", "cut", "uname", "basename", "readlink",
+                     "mktemp", "rm"):
+            found = shutil.which(name)
+            if found and not (tools / name).exists():
+                (tools / name).symlink_to(found)
+        gh = self.bindir / "gh"
+        if gh.exists():
+            gh.unlink()
+        return "%s%s%s" % (self.bindir, os.pathsep, tools)
+
     def install_stub(self, name):
         target = self.bindir / name
         shutil.copy(STUBS / name, target)

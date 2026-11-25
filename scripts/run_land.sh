@@ -221,14 +221,22 @@ esac
 
 # ------------------------------------------------- F. close GitHub issues (merge)
 # The work is on the base now.  A failure here is reported and does not undo the
-# landing: it is done, and /issue-pilot:close can finish the issues.
+# landing: it is done.  The record then says the issues are still open (no
+# --closes-automatically below), which is what lets /issue-pilot:close finish
+# them -- it refuses to act on a record that claims nothing is left to close.
+# (Review fix-1: the record used to claim it regardless, so the warning named a
+# way out that refused to act.)
+github_closed=1
 if [[ "$tracker" == github && "$landing" == merge ]]; then
-  close_issues text_github || echo "warning: some issues could not be closed; /issue-pilot:close can do it." >&2
+  close_issues text_github || {
+    github_closed=0
+    echo "warning: some issues could not be closed; /issue-pilot:close can do it." >&2
+  }
 fi
 
 # ------------------------------------------------------------------- G. record
 closes=()
-if [[ "$tracker" == local || "$landing" == merge ]]; then
+if [[ "$tracker" == local || ( "$landing" == merge && $github_closed -eq 1 ) ]]; then
   closes=(--closes-automatically)
 fi
 python3 "$STATE" pr "$description" --kind "$landing" --base "$base" --head "$tip" ${closes[@]+"${closes[@]}"} >/dev/null
