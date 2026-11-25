@@ -28,8 +28,10 @@ Subcommands
   unblock [id]  Clears the blocked flag and puts the blocked item back to
         pending, so `next` hands it out again.  With no argument it reopens
         whatever is currently blocked.
-  pr <url> --number N --base B [--closes-automatically]
-        Records the pull request that closes the run.
+  pr <url> --number N --base B [--closes-automatically] [--kind K] [--head SHA]
+        Records the pull request that closes the run, or -- with --kind merge,
+        push or branch, and a one-line description in place of the URL -- the
+        landing that closed it instead.
   show  Dumps the whole state as JSON.
   status  The same thing for a human: what is done, what is next, what stopped.
   quick The fast answer while a run is going: is the driver alive, how far it
@@ -298,8 +300,9 @@ def fix_add_refused(message):
 def cmd_fix_add(args):
     state = load()
     if state.get("pull_request"):
-        fix_add_refused("fix-add is refused once a pull request is recorded; "
-                        "its body would no longer describe the branch.")
+        fix_add_refused("fix-add is refused once a pull request (or a landing) is "
+                        "recorded; the run is over and what was published would "
+                        "no longer describe the branch.")
 
     issue_numbers = {item["issue"] for item in state["plan"]
                      if isinstance(item["issue"], int)}
@@ -445,9 +448,31 @@ def cmd_pr(args):
         # our job, and the run has to say so rather than leave them open for
         # weeks in the belief that it was handled.
         "closes_automatically": bool(args.closes_automatically),
+        # What kind of landing this was.  The key stays `pull_request` whatever
+        # it is: fix-add, the hook and the state files of runs made before the
+        # other landings existed all read it, and none needs a migration.  A
+        # record with no `kind` is a pull request.  For the other kinds `url` is
+        # a one-line description of what happened instead of an address.
+        "kind": args.kind,
+        "head": args.head,
     }
     save(state)
-    print(f"pull request {args.url} recorded")
+    if args.kind == "pull_request":
+        print(f"pull request {args.url} recorded")
+    else:
+        print(f"landing recorded: {args.url}")
+
+
+def landing_of(state):
+    """The project's `landing` setting, for wording only.
+
+    `status` is what people run when something is already wrong, so a broken
+    configuration file must not stop it: it falls back to the default.
+    """
+    try:
+        return pilot_config.load(state.get("repo_root"))["landing"]
+    except SystemExit:
+        return "pull_request"
 
 
 def cmd_status(args):
@@ -490,11 +515,17 @@ def cmd_status(args):
     print()
 
     pr = state.get("pull_request")
-    if pr:
+    if pr and pr.get("kind", "pull_request") == "pull_request":
         print(f"pull req   : {pr['url']} -> {pr['base']}")
         if not pr.get("closes_automatically"):
             print("             merging this will NOT close the issues (the base is not")
             print("             the default branch); run /issue-pilot:close after.")
+        print()
+    elif pr:
+        print(f"landed     : {pr['url']} -> {pr['base']}")
+        if not pr.get("closes_automatically"):
+            print("             the issues stay open until the branch is merged;")
+            print("             run /issue-pilot:close then.")
         print()
 
     blocked = state.get("blocked")
@@ -503,7 +534,10 @@ def cmd_status(args):
         print(f"logs: {log_dir(state)}")
         print("retry it with: issues_run.sh --resume")
     elif all(v == "done" for v in state["status"].values()):
-        print("every issue is done -- open the pull request with /issue-pilot:pr")
+        if landing_of(state) == "pull_request":
+            print("every issue is done -- open the pull request with /issue-pilot:pr")
+        else:
+            print("every issue is done -- finish the run with /issue-pilot:pr")
     else:
         pending = [n for n, v in state["status"].items() if v == "pending"]
         print(f"pending: {', '.join(label(n) for n in pending)}")
@@ -746,6 +780,9 @@ def main():
     p.add_argument("--number", type=int)
     p.add_argument("--base")
     p.add_argument("--closes-automatically", action="store_true")
+    p.add_argument("--kind", choices=["pull_request", "merge", "push", "branch"],
+                   default="pull_request")
+    p.add_argument("--head", help="the commit the run landed (the tip of the run branch)")
     p.set_defaults(func=cmd_pr)
 
     sub.add_parser("show").set_defaults(

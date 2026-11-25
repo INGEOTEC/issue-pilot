@@ -707,7 +707,11 @@ if [[ $OPEN_PR -eq 1 ]]; then
     --session-id "$(new_session)" \
     --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$LOGDIR/pull-request.log"
 else
-  echo "all issues implemented; open the pull request with: /issue-pilot:pr"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "all issues implemented; open the pull request with: /issue-pilot:pr"
+  else
+    echo "all issues implemented; finish the run with: /issue-pilot:pr"
+  fi
 fi
 
 # ------------------------------------------------------------ where the tree is left
@@ -735,7 +739,11 @@ return_to_base() {
       return 0
     }
   fi
-  echo "pull request opened; back on $BASE, the work is on branch $BRANCH"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "pull request opened; back on $BASE, the work is on branch $BRANCH"
+  else
+    echo "run landed; back on $BASE, the work is on branch $BRANCH"
+  fi
 }
 
 pull_request_recorded() {
@@ -746,7 +754,15 @@ if [[ $OPEN_PR -eq 1 ]] && pull_request_recorded; then
   return_to_base
 else
   if [[ $OPEN_PR -eq 1 ]]; then
-    echo "no pull request was recorded; open it with /issue-pilot:pr" >&2
+    if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+      echo "no pull request was recorded; open it with /issue-pilot:pr" >&2
+    else
+      echo "no landing was recorded; finish the run with /issue-pilot:pr" >&2
+    fi
   fi
-  echo "the work is on branch $BRANCH, checked out for review; /issue-pilot:pr opens the pull request and returns to ${BASE:-the base branch}"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "the work is on branch $BRANCH, checked out for review; /issue-pilot:pr opens the pull request and returns to ${BASE:-the base branch}"
+  else
+    echo "the work is on branch $BRANCH, checked out for review; finish the run with /issue-pilot:pr, which lands it and returns to ${BASE:-the base branch}"
+  fi
 fi

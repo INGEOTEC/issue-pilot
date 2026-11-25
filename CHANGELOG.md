@@ -37,6 +37,17 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   is GitHub's (`pilot_config.py uses-github`); the driver requires it only
   then. `check` insists on `base_branch` in that case, since there is no
   default to ask for. New `pilot_config.py` subcommands: `uses-github`, `remote`.
+- `landing` is honoured. `scripts/run_land.sh` finishes a run without a GitHub
+  pull request: `merge` brings the base into the run branch if it moved, runs
+  the tests and makes the base equal to the run branch (pushing it *as* the base
+  to `origin`, or fast-forwarding locally when there is no remote; the run
+  branch itself is never pushed); `push` pushes the run branch; `branch` leaves
+  it for you to merge. Local issues are closed on the run branch before it
+  lands, GitHub issues are closed by the script for `merge`. `/issue-pilot:pr`
+  hands over to it for any landing other than `pull_request`, and
+  `/issue-pilot:close` works for every landing and tracker. `issues_state.py pr`
+  records the `kind` and `head` of the landing, and `status` shows a `landed`
+  line for the new kinds.
 
 ## [0.6.0] - 2026-11-18
 

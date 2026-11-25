@@ -495,8 +495,8 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
 | `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). Refuses, and suggests `/issue-pilot:plan`, when there is no run, or its pull request is already open. |
-| `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
-| `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
+| `/issue-pilot:pr` | Opens the single pull request, if every issue is done, or lands the run the way `landing` says. |
+| `/issue-pilot:close` | Closes the issues by hand once the work is merged, when nothing closed them already. |
 
 The driver underneath, for the times you want it directly:
 
@@ -545,6 +545,11 @@ After the merge:
 which checks the pull request really is merged, comments on each issue with the
 pull request and the commit that implemented it, and closes it. It refuses to
 close anything for an unmerged pull request unless you pass `--force`.
+
+With a local tracker, or with `landing: merge`, the issues are closed when the
+run lands and `/issue-pilot:close` has nothing to do. With `landing: push` or
+`branch` on a GitHub tracker, it is what closes them once you have merged the
+branch.
 
 ## Writing issues it can implement
 

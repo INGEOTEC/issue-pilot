@@ -160,6 +160,59 @@ class RunState(PilotTestCase):
         self.assertIn("will NOT close the issues", out)
         self.assertIn("/issue-pilot:close", out)
 
+    def test_pr_records_the_kind_and_head_of_a_landing(self):
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        out = self.run_script("issues_state.py", "pr", "merged into main at abc1234",
+                              "--kind", "merge", "--base", "main", "--head", "abc1234def",
+                              "--closes-automatically")
+        self.assertEqual(out.stdout.strip(), "landing recorded: merged into main at abc1234")
+        record = self.state()["pull_request"]
+        self.assertEqual((record["kind"], record["head"], record["base"]),
+                         ("merge", "abc1234def", "main"))
+
+    def test_a_pull_request_is_recorded_with_its_kind_too(self):
+        self.init(1)
+        out = self.run_script("issues_state.py", "pr", "https://gh/pr/7", "--number", "7", "--base", "main")
+        self.assertEqual(out.stdout.strip(), "pull request https://gh/pr/7 recorded")
+        self.assertEqual(self.state()["pull_request"]["kind"], "pull_request")
+
+    def test_status_shows_a_landed_line_for_each_other_kind(self):
+        for kind, automatic in (("merge", True), ("push", False), ("branch", False)):
+            with self.subTest(kind=kind):
+                self.init(1)
+                self.run_script("issues_state.py", "done", "1")
+                args = ["pr", "described %s" % kind, "--kind", kind, "--base", "main"]
+                self.run_script("issues_state.py", *args, *(["--closes-automatically"] if automatic else []))
+                out = self.run_script("issues_state.py", "status").stdout
+                self.assertIn("landed     : described %s -> main" % kind, out)
+                self.assertNotIn("pull req   :", out)
+                self.assertEqual("the issues stay open until the branch is merged" in out, not automatic)
+                self.assertEqual("/issue-pilot:close" in out, not automatic)
+
+    def test_a_record_without_a_kind_is_a_pull_request(self):
+        # State files written before landings existed have no `kind`.
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        self.run_script("issues_state.py", "pr", "https://gh/pr/7", "--number", "7", "--base", "main",
+                        "--closes-automatically")
+        path = next(self.home.glob("state/issues-run-*.json"))
+        state = json.loads(path.read_text())
+        del state["pull_request"]["kind"], state["pull_request"]["head"]
+        path.write_text(json.dumps(state))
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn("pull req   : https://gh/pr/7 -> main", out)
+        self.assertNotIn("landed", out)
+
+    def test_the_last_line_names_the_landing(self):
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        self.assertIn("every issue is done -- open the pull request with /issue-pilot:pr",
+                      self.run_script("issues_state.py", "status").stdout)
+        self.write_config({"test_command": "true", "base_branch": "main", "landing": "merge"})
+        self.assertIn("every issue is done -- finish the run with /issue-pilot:pr",
+                      self.run_script("issues_state.py", "status").stdout)
+
     def test_status_points_at_the_pull_request_when_everything_is_done(self):
         self.init(1)
         self.run_script("issues_state.py", "done", "1")
@@ -937,6 +990,25 @@ class IssuesGoThroughTheTracker(unittest.TestCase):
             "issues_state.py\" done <n> --commit <hash>")]
         self.assertEqual(order, sorted(order))
         self.assertNotIn('--commit "$(git rev-parse HEAD)"', text)
+
+    def test_pr_md_hands_other_landings_to_run_land(self):
+        text = self.text("commands/pr.md")
+        self.assertIn('bash "${CLAUDE_PLUGIN_ROOT}/scripts/run_land.sh"', text)
+        self.assertIn("run_land.sh\" --close-issues-only", text)
+        self.assertIn("get landing", text)
+        self.assertIn("Finish an issue-pilot run: open its pull request, or land it the way "
+                      "the project is configured", text)
+        self.assertIn("(local tracker, closed on this branch)", text)
+
+    def test_close_md_works_for_every_landing_and_tracker(self):
+        text = self.text("commands/close.md")
+        self.assertNotIn("gh issue", text)
+        self.assertIn("issues_tracker.py\" close <n>", text)
+        self.assertIn("issues_tracker.py\" commit --push", text)
+        self.assertIn("git merge-base --is-ancestor <head>", text)
+        self.assertIn("--force", text)
+        self.assertIn("Close the issues of a run once its work is merged, when nothing "
+                      "closed them automatically", text)
 
     def test_plan_commits_and_pushes_the_new_issue(self):
         text = self.text("commands/plan.md")
