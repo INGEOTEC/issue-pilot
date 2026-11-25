@@ -1010,6 +1010,45 @@ class IssuesGoThroughTheTracker(unittest.TestCase):
         self.assertIn("Close the issues of a run once its work is merged, when nothing "
                       "closed them automatically", text)
 
+    def test_init_md_asks_everything_in_two_calls(self):
+        text = " ".join(self.text("commands/init.md").split())
+        for needle in ("pilot_config.py\" hosting", "pilot_config.py\" exclude .issue-pilot.json",
+                       "pilot_config.py\" tracking", "config_land.sh\" --direct",
+                       "two calls", "`tracker`", "`landing`", "`.issue-pilot.json`",
+                       "The issues directory", "kept out", "versioned",
+                       "(GitHub or not)"):
+            self.assertIn(needle, text)
+        # The pull-request flow is still there for GitHub.
+        self.assertIn('config_land.sh" --merge', self.text("commands/init.md"))
+
+    def test_the_readme_documents_every_setting_and_the_feature(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import pilot_config
+        readme = (SCRIPTS.parent / "README.md").read_text()
+        rows = {line.split("|")[1].strip().strip("`") for line in readme.splitlines()
+                if line.startswith("| `") and line.count("|") >= 4}
+        for key in pilot_config.DEFAULTS:
+            self.assertIn(key, rows, "README settings table lacks %s" % key)
+        self.assertIn("## Without GitHub", readme)
+        for needle in ("Overleaf", "landing", "issue-pilot:comment", ".git/info/exclude",
+                       "Not supported"):
+            self.assertIn(needle, readme)
+
+    def test_the_example_configuration_lists_every_setting(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import pilot_config
+        example = json.loads((SCRIPTS.parent / ".issue-pilot.example.json").read_text())
+        self.assertEqual(set(example), set(pilot_config.DEFAULTS))
+
+    def test_the_release_is_one_section_with_an_empty_unreleased_above_it(self):
+        changelog = (SCRIPTS.parent / "CHANGELOG.md").read_text()
+        version = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
+        self.assertEqual(version, "0.7.0")
+        self.assertEqual(changelog.count("## [0.7.0] - "), 1)
+        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.0]", 1)[0]
+        self.assertEqual(unreleased.strip(), "")
+        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[1-9])\]")
+
     def test_plan_commits_and_pushes_the_new_issue(self):
         text = self.text("commands/plan.md")
         self.assertIn("commit --push", text)

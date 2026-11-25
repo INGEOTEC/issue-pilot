@@ -6,48 +6,69 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-25
+
+issue-pilot without GitHub. A project that cannot be on GitHub and has a git of
+its own — a paper whose only remote is Overleaf's git, a repository on a
+self-hosted server, one with no remote at all — can now be planned, run and
+landed. Two independent settings decide it: `tracker` (where issues live) and
+`landing` (how a finished run reaches the base branch). With the defaults
+(`github`, `pull_request`) nothing changes beyond the spelling of the commands
+the sessions run.
+
 ### Added
 
-- Three settings, `tracker` (`github` or `local`), `issues_dir` (default `issues`)
-  and `landing` (`pull_request`, `merge`, `push` or `branch`), and
-  `scripts/issues_tracker.py`, which performs every issue operation (view, list,
-  create, comment, close, and committing the issues) for the configured tracker.
-  The `local` tracker keeps one markdown file per issue, comments included, in
-  `issues_dir`. The planner (`issues_plan.py`) and `issue_base.py drift` read
-  issues through it. Nothing changes with the defaults.
+- Settings `tracker` (`github` or `local`), `issues_dir` (default `issues`) and
+  `landing` (`pull_request`, `merge`, `push` or `branch`), validated by
+  `pilot_config.py check`.
+- `scripts/issues_tracker.py`, which performs every issue operation (`view`,
+  `list`, `create`, `comment`, `close`, and `commit` for the issue files) for the
+  configured tracker. The `local` tracker keeps one markdown file per issue in
+  `issues_dir`, comments included; a file written by hand is accepted.
+- `scripts/run_land.sh`, which finishes a run without a GitHub pull request.
+  `merge` brings the base into the run branch if it moved, runs the tests and
+  makes the base equal to the run branch (pushing it *as* the base to `origin`,
+  or fast-forwarding locally when there is no remote; the run branch itself is
+  never pushed); `push` pushes the run branch; `branch` leaves it for you to
+  merge. Local issues are closed on the run branch before it lands, GitHub
+  issues are closed by the script for `merge`. Nothing is rebased or
+  force-pushed.
+- `/issue-pilot:init` asks where issues live, how runs land, and whether the
+  configuration file and the issues directory are versioned or ignored (two
+  `AskUserQuestion` calls), and lands the configuration in the way that fits.
+  Ignoring uses `.git/info/exclude`, so choosing it changes nothing in the
+  repository.
+- `pilot_config.py` subcommands `uses-github`, `remote`, `hosting` (origin and
+  GitHub, judged offline from the URL), `exclude <path>...` and `tracking
+  <path>`; `detect` proposes `local` and `merge` for a repository that is not on
+  GitHub, without calling `gh`.
+- `config_land.sh --direct`, which commits the configuration on the base branch
+  (and pushes it when there is a remote) for projects that do not land through
+  pull requests; a refused push is undone. Every mode refuses when
+  `.issue-pilot.json` is ignored.
+- `issues_state.py pr --kind --head` records how a run landed, and `status`
+  shows a `landed` line for the new kinds.
+- A "Without GitHub" section in the README.
 
 ### Changed
 
 - `/issue-pilot:plan`, `/issue-pilot:run`, `/issue-pilot:fix`, the per-issue
-  prompt and the driver's interview reach issues through
-  `scripts/issues_tracker.py` instead of `gh issue ...`. With `tracker: local`,
-  planning, running and review fixes work on markdown issues. `plan` commits
-  and pushes a new local issue file to the base branch (`issues_tracker.py
-  commit --push`), and each item records its outcome with a comment followed by
-  `issues_tracker.py commit`. Finishing an issue now notes the work's commit
-  hash before commenting, so the hash recorded for the item is the work's, not
-  the comment's. With the defaults nothing changes beyond the spelling of the
-  commands.
-- The configuration is checked before the driver looks for `gh`, since whether
-  `gh` is needed is read from it (see below).
+  prompt and the driver's interview reach issues through `issues_tracker.py`
+  instead of `gh issue ...`. `plan` commits and pushes a new local issue file to
+  the base branch, and each item records its outcome with a comment followed by
+  `issues_tracker.py commit`. Finishing an issue notes the work's commit hash
+  before commenting, so the hash recorded for the item is the work's, not the
+  comment's.
+- `/issue-pilot:pr` hands over to `run_land.sh` for any landing other than
+  `pull_request`, and `/issue-pilot:close` works for every landing and tracker.
 - issue-pilot starts in a repository with no remote: `base_sync.sh`,
   `issue_base.py stamp` and `issue_base.py drift` take the local base branch as
-  the reference when there is no `origin`. `gh` is not needed, and is not
-  called to look up the default branch, when neither the tracker nor the landing
-  is GitHub's (`pilot_config.py uses-github`); the driver requires it only
-  then. `check` insists on `base_branch` in that case, since there is no
-  default to ask for. New `pilot_config.py` subcommands: `uses-github`, `remote`.
-- `landing` is honoured. `scripts/run_land.sh` finishes a run without a GitHub
-  pull request: `merge` brings the base into the run branch if it moved, runs
-  the tests and makes the base equal to the run branch (pushing it *as* the base
-  to `origin`, or fast-forwarding locally when there is no remote; the run
-  branch itself is never pushed); `push` pushes the run branch; `branch` leaves
-  it for you to merge. Local issues are closed on the run branch before it
-  lands, GitHub issues are closed by the script for `merge`. `/issue-pilot:pr`
-  hands over to it for any landing other than `pull_request`, and
-  `/issue-pilot:close` works for every landing and tracker. `issues_state.py pr`
-  records the `kind` and `head` of the landing, and `status` shows a `landed`
-  line for the new kinds.
+  the reference when there is no `origin`.
+- `gh` is required only when the project uses GitHub (`pilot_config.py
+  uses-github`: the tracker is `github` or the landing is `pull_request`), and
+  is not called to look up the default branch otherwise; `check` then insists on
+  `base_branch`. The configuration is checked before the driver looks for `gh`.
+  `install.sh` words its `gh` warning accordingly.
 
 ## [0.6.0] - 2026-11-18
 

@@ -241,6 +241,19 @@ def has_origin(root=None) -> bool:
     return out.returncode == 0
 
 
+def hosting(root=None) -> dict:
+    """Where this repository's remote is, judged offline from the URL of `origin`.
+
+    `origin` is whether there is one; `github` whether its URL names github.com.
+    No network and no `gh`: it only decides which option /issue-pilot:init
+    offers first, and a wrong guess costs one different answer, not a failure.
+    """
+    out = subprocess.run(["git", "remote", "get-url", "origin"],
+                         capture_output=True, text=True, cwd=root)
+    origin = out.returncode == 0
+    return {"origin": origin, "github": origin and "github.com" in out.stdout}
+
+
 def default_branch(repo=None) -> str:
     """The repository's default branch on GitHub.
 
@@ -316,9 +329,87 @@ def detect(root=None) -> dict:
     """A proposed configuration for this repository, for a human to confirm."""
     root = root or repo_root()
     cfg = {key: default for key, (default, _) in DEFAULTS.items()}
+    # Before the base branch is resolved: a repository that is not on GitHub is
+    # never asked of `gh`, and the proposal is then the branch it is on.
+    if not hosting(root)["github"]:
+        cfg["tracker"], cfg["landing"] = "local", "merge"
     cfg["base_branch"] = resolve_base_branch(cfg)
     cfg["test_command"] = detect_test_command(root)
     return cfg
+
+
+def _info_exclude(root):
+    """The clone-local ignore file, wherever git keeps it (worktrees included)."""
+    out = subprocess.run(["git", "rev-parse", "--git-path", "info/exclude"],
+                         capture_output=True, text=True, cwd=root)
+    if out.returncode != 0:
+        sys.exit("not inside a git repository")
+    return pathlib.Path(root) / out.stdout.strip()
+
+
+def _repo_path(root, path):
+    """`(name, is_directory)` for a path given relative to the repository root."""
+    name = path.strip("/")
+    problem = issues_dir_problem(name) if name else "is empty"
+    if problem:
+        sys.exit("cannot exclude %r: it %s" % (path, problem.replace("must be", "has to be")))
+    return name, path.endswith("/") or (pathlib.Path(root) / name).is_dir()
+
+
+def exclude(paths, root=None):
+    """Keep `paths` out of git in this clone only, through `.git/info/exclude`.
+
+    Not `.gitignore`: the point of ignoring is to leave the repository untouched,
+    and `.gitignore` is itself a versioned file.  Patterns are anchored
+    (`/issues/`), so they cannot catch a same-named path elsewhere.  Returns the
+    lines to print; exits 2, changing nothing, when git already tracks something
+    there -- an ignore pattern does not apply to a tracked file, so it would
+    promise something it cannot deliver.
+    """
+    root = root or repo_root()
+    wanted = []
+    for path in paths:
+        name, is_dir = _repo_path(root, path)
+        tracked = subprocess.run(["git", "ls-files", "--", name], capture_output=True,
+                                 text=True, cwd=root).stdout.strip()
+        if tracked:
+            print("error: git already tracks %s, so ignoring it would do nothing.\n"
+                  "  To turn a versioned path into an ignored one:\n"
+                  "    git rm -r --cached %s    # then commit\n"
+                  "  and run this again." % (name, name), file=sys.stderr)
+            sys.exit(2)
+        wanted.append("/" + name + ("/" if is_dir else ""))
+
+    target = _info_exclude(root)
+    existing = target.read_text().splitlines() if target.exists() else []
+    report, added = [], []
+    for pattern in wanted:
+        if pattern in (line.strip() for line in existing + added):
+            report.append("already excluded " + pattern)
+        else:
+            added.append(pattern)
+            report.append("excluded " + pattern)
+    if added:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = target.read_text() if target.exists() else ""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        target.write_text(text + "".join(p + "\n" for p in added))
+    return report
+
+
+def tracking(path, root=None) -> str:
+    """`ignored` when git ignores `path` here, else `versioned`.
+
+    Asked of git every time rather than remembered: an answer from memory can
+    disagree with the repository, git cannot.  A directory is probed through a
+    file that would live in it, which works before it exists.
+    """
+    root = root or repo_root()
+    name, is_dir = _repo_path(root, path)
+    probe = name + "/.probe" if is_dir else name
+    out = subprocess.run(["git", "check-ignore", "-q", "--", probe], cwd=root)
+    return "ignored" if out.returncode == 0 else "versioned"
 
 
 def validate(root=None):
@@ -382,6 +473,11 @@ def main():
 
     sub.add_parser("uses-github", help="print yes when gh is needed (tracker or landing is GitHub's), else no")
     sub.add_parser("remote", help="print origin when that remote exists, nothing otherwise")
+    sub.add_parser("hosting", help="print as JSON whether origin exists and whether it is on GitHub")
+    p = sub.add_parser("exclude", help="keep paths out of git in this clone (.git/info/exclude)")
+    p.add_argument("paths", nargs="+")
+    p = sub.add_parser("tracking", help="print ignored or versioned for a path")
+    p.add_argument("path")
     sub.add_parser("default-branch", help="print the repository's default branch on GitHub")
     sub.add_parser("check", help="fail unless this repository is configured")
     sub.add_parser("detect", help="propose a configuration for this repository")
@@ -423,6 +519,12 @@ def main():
     elif args.cmd == "remote":
         if has_origin():
             print("origin")
+    elif args.cmd == "hosting":
+        print(json.dumps(hosting()))
+    elif args.cmd == "exclude":
+        print("\n".join(exclude(args.paths)))
+    elif args.cmd == "tracking":
+        print(tracking(args.path))
     elif args.cmd == "default-branch":
         print(default_branch())
     elif args.cmd == "check":

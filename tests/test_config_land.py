@@ -238,5 +238,74 @@ class ConfigLand(PilotTestCase):
         self.assertIn("could not fetch", out.stderr)
 
 
+class Direct(ConfigLand):
+    """`--direct`: for a project whose landing is not a pull request."""
+
+    def test_commits_only_the_file_on_the_base_and_pushes_it(self):
+        out = self.land("--direct")
+        self.assertRegex(out.stdout, r"^committed [0-9a-f]+ on main and pushed to origin\n$")
+        self.assertEqual(self.git("rev-list", "--count", "origin/main..main"), "0")
+        self.assertEqual(self.origin_git("rev-parse", "main"), self.git("rev-parse", "HEAD"))
+        self.assertEqual(self.git("show", "--name-only", "--format=%s", "HEAD"),
+                         "Configure issue-pilot for this repository\n\n.issue-pilot.json")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("branch", "--list", BRANCH), "")
+        self.assertEqual(self.pr_calls(), [])
+
+    def test_a_refused_push_is_undone(self):
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'push rejected' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        before = self.git("rev-parse", "main")
+        out = self.land("--direct", check=False)
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("refused a direct push to main", out.stderr)
+        self.assertIn("pilot_config.py", out.stderr)
+        self.assertIn("exclude .issue-pilot.json", out.stderr)
+        self.assertEqual(self.git("rev-parse", "main"), before)
+        self.assertEqual(self.git("status", "--porcelain"), "?? .issue-pilot.json")
+
+    def test_with_no_remote_it_commits_on_the_local_base(self):
+        self._git("remote", "remove", "origin")
+        out = self.land("--direct")
+        self.assertRegex(out.stdout, r"^committed [0-9a-f]+ on main\n$")
+        self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD"), ".issue-pilot.json")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_a_base_that_is_behind_origin_is_still_refused(self):
+        self.land_on_origin("later.txt")
+        out = self.land("--direct", check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("is not at origin/main", out.stderr)
+
+    def test_other_changes_in_the_tree_are_still_refused(self):
+        (self.repo / "stray.txt").write_text("x\n")
+        out = self.land("--direct", check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("stray.txt", out.stderr)
+
+    def test_it_does_not_combine_with_merge(self):
+        out = self.land("--direct", "--merge", check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("usage", out.stderr)
+        self.assertEqual(self.git("rev-list", "--count", "origin/main..main"), "0")
+
+
+class Ignored(ConfigLand):
+    """A configuration that is kept out of git has nothing to land."""
+
+    def test_every_mode_refuses(self):
+        self.run_script("pilot_config.py", "exclude", ".issue-pilot.json")
+        before = self.git("rev-parse", "main")
+        for args in ([], ["--merge"], ["--direct"]):
+            with self.subTest(args=args):
+                out = self.land(*args, check=False)
+                self.assertEqual(out.returncode, 2, out.stderr)
+                self.assertIn("the configuration is not versioned here; there is nothing to land", out.stderr)
+                self.assertEqual(out.stdout, "")
+                self.assertEqual(self.git("rev-parse", "main"), before)
+        self.assertEqual(self.pr_calls(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

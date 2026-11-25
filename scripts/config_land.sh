@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Land .issue-pilot.json on the base branch through a pull request.
+# Land .issue-pilot.json on the base branch: through a pull request, or -- for a
+# project that does not land through pull requests -- straight onto the base.
 #
 # Everything issue-pilot does starts from the base branch as it is on origin,
 # and base_sync.sh refuses a local base that is ahead of it.  So a configuration
@@ -21,12 +22,25 @@
 #   config_land.sh            branch, commit, push and open the pull request
 #   config_land.sh --merge    ... and squash-merge it right away, then bring the
 #                             local base branch up to the merge
+#   config_land.sh --direct   for a project whose landing is not a pull request
+#                             (a self-hosted server, Overleaf's git, no remote at
+#                             all): commit the file on the base branch itself and,
+#                             when there is a remote, push the base.  There is no
+#                             review step to route a configuration through, and
+#                             no branch is made.  A refused push is undone -- the
+#                             commit is taken back and the file is an uncommitted
+#                             change again -- so the base never stays ahead of the
+#                             remote, which every other command refuses.
+#                             Mutually exclusive with --merge.
 #
-# Stdout is the pull request URL and nothing else; the narration is on stderr.
-# Exit status: 2 for a refusal, 1 for a failed fetch or push, 0 once the pull
-# request is open -- even if --merge was refused by GitHub (a base that needs
-# approvals or passing checks): the pull request exists, and has to be merged by
-# hand.
+# When .issue-pilot.json is ignored (`pilot_config.py tracking`) there is nothing
+# to land, and every mode refuses.
+#
+# Stdout is the pull request URL -- or, with --direct, `committed <sha> on <base>`
+# and nothing else; the narration is on stderr.  Exit status: 2 for a refusal, 1
+# for a failed fetch or push, 0 once the pull request is open -- even if --merge
+# was refused by GitHub (a base that needs approvals or passing checks): the pull
+# request exists, and has to be merged by hand.
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,21 +50,37 @@ BRANCH="configure-issue-pilot"
 TITLE="Configure issue-pilot for this repository"
 
 merge=0
+direct=0
 for arg in "$@"; do
   case "$arg" in
     --merge) merge=1 ;;
-    *) echo "usage: config_land.sh [--merge]" >&2; exit 2 ;;
+    --direct) direct=1 ;;
+    *) echo "usage: config_land.sh [--merge | --direct]" >&2; exit 2 ;;
   esac
 done
+if (( merge && direct )); then
+  echo "usage: config_land.sh [--merge | --direct]; --merge opens a pull request and --direct does not, so they do not combine." >&2
+  exit 2
+fi
 
 cd "$(git rev-parse --show-toplevel)"
 
+if [[ "$(python3 "$CONFIG" tracking "$FILE")" == ignored ]]; then
+  echo "error: the configuration is not versioned here; there is nothing to land." >&2
+  exit 2
+fi
+
 base="$(python3 "$CONFIG" base-branch)"
 
-git fetch --quiet origin "$base" || {
-  echo "error: could not fetch origin/$base; there is nothing to judge \"at origin's tip\" against." >&2
-  exit 1
-}
+# Without a remote there is nothing to fetch or to be ahead of, and the checks
+# against origin do not apply; only --direct is meant for that case.
+remote="$(python3 "$CONFIG" remote)"
+if (( ! direct )) || [[ -n "$remote" ]]; then
+  git fetch --quiet origin "$base" || {
+    echo "error: could not fetch origin/$base; there is nothing to judge \"at origin's tip\" against." >&2
+    exit 1
+  }
+fi
 
 current="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$current" != "$base" ]]; then
@@ -64,8 +94,11 @@ MSG
   exit 2
 fi
 
-ahead="$(git rev-list --count "origin/$base..$base")"
-behind="$(git rev-list --count "$base..origin/$base")"
+ahead=0; behind=0
+if (( ! direct )) || [[ -n "$remote" ]]; then
+  ahead="$(git rev-list --count "origin/$base..$base")"
+  behind="$(git rev-list --count "$base..origin/$base")"
+fi
 if (( ahead > 0 || behind > 0 )); then
   cat >&2 <<MSG
 error: local $base is not at origin/$base ($ahead commit(s) ahead, $behind behind);
@@ -95,6 +128,27 @@ $(sed 's/^/    /' <<<"$others")
     git stash pop         # afterwards
 MSG
   exit 2
+fi
+
+if (( direct )); then
+  git add -- "$FILE"
+  git commit --quiet -m "$TITLE" -- "$FILE"
+  short="$(git rev-parse --short HEAD)"
+  if [[ -z "$remote" ]]; then
+    echo "committed $short on $base"
+    exit 0
+  fi
+  if ! git push --quiet origin "$base" >&2; then
+    # Put things back as they were: the commit taken back, the file an
+    # uncommitted change again.
+    git reset --quiet --soft HEAD~1
+    git reset --quiet -- "$FILE"
+    echo "error: the remote refused a direct push to $base; nothing was changed ($FILE is back in the working tree)." >&2
+    echo "       The configuration can stay out of git instead: python3 \"$CONFIG\" exclude $FILE" >&2
+    exit 1
+  fi
+  echo "committed $short on $base and pushed to origin"
+  exit 0
 fi
 
 if git show-ref --verify --quiet "refs/heads/$BRANCH"; then

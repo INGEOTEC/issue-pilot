@@ -41,9 +41,12 @@ if [[ $UNINSTALL -eq 1 ]]; then
   exit 0
 fi
 
-for tool in git gh claude python3 curl; do
+for tool in git claude python3 curl; do
   command -v "$tool" >/dev/null 2>&1 || echo "warning: \`$tool\` is not on PATH; issue-pilot needs it" >&2
 done
+# gh is only needed by projects on GitHub (issues or pull requests), so it gets
+# its own wording: a project with a git of its own can run without it.
+command -v gh >/dev/null 2>&1 || echo "warning: \`gh\` is not on PATH; issue-pilot needs it for projects on GitHub" >&2
 
 mkdir -p "$LIB" "$COMMANDS"
 rm -rf "$LIB/scripts" "$LIB/hooks" "$LIB/.claude-plugin"
