@@ -69,6 +69,7 @@ class PilotTestCase(unittest.TestCase):
             "FAKE_GH_ISSUES": str(self.issues_file),
             "FAKE_GH_DEFAULT_BRANCH": "main",
             "FAKE_GH_PR_LOG": str(root / "gh-pr.jsonl"),
+            "FAKE_GH_ISSUE_LOG": str(root / "gh-issues.jsonl"),
             "FAKE_CLAUDE_LOG": str(self.claude_log),
             "FAKE_CLAUDE_COUNTER": str(root / "claude-counter"),
             "FAKE_NOTIFY_LOG": str(root / "notify-send.log"),
@@ -145,5 +146,5 @@ class PilotTestCase(unittest.TestCase):
 
 
 def issue(number, title="t", body="", comments=()):
-    return {"number": number, "title": title, "body": body,
+    return {"number": number, "title": title, "body": body, "state": "OPEN",
             "comments": [{"body": c} for c in comments]}

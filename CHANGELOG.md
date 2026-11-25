@@ -6,6 +6,17 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Three settings, `tracker` (`github` or `local`), `issues_dir` (default `issues`)
+  and `landing` (`pull_request`, `merge`, `push` or `branch`), and
+  `scripts/issues_tracker.py`, which performs every issue operation (view, list,
+  create, comment, close, and committing the issues) for the configured tracker.
+  The `local` tracker keeps one markdown file per issue, comments included, in
+  `issues_dir`. The planner (`issues_plan.py`) and `issue_base.py drift` read
+  issues through it. The commands and prompts do not use the new settings yet:
+  they still call `gh`, and nothing changes with the defaults.
+
 ## [0.6.0] - 2026-11-18
 
 ### Removed

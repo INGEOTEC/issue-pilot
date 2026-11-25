@@ -92,6 +92,18 @@ class IssueBase(PilotTestCase):
         self.assertEqual(data["tip"], tip)
         self.assertEqual(data["issues"][0]["state"], "current")
 
+    def test_drift_reads_the_stamp_of_a_local_issue(self):
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self._git("push", "-q", "origin", "main")
+        self.sync()
+        tip = self.git("rev-parse", "origin/main")
+        issues = self.repo / "issues"
+        issues.mkdir()
+        (issues / "0001-one.md").write_text(
+            "# One\n\n## Context\n\n_Planned against `main` at `%s`._\n" % tip)
+        out = self.drift(1).stdout
+        self.assertIn("#1  planned against main at %s -- the current tip" % tip[:9], out)
+
 
 if __name__ == "__main__":
     unittest.main()

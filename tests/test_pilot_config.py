@@ -122,6 +122,45 @@ class Configuration(PilotTestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("not valid JSON", out.stderr)
 
+    def test_the_tracker_settings_have_their_defaults(self):
+        self.assertEqual(self.get("tracker"), "github")
+        self.assertEqual(self.get("issues_dir"), "issues")
+        self.assertEqual(self.get("landing"), "pull_request")
+        shown = json.loads(self.run_script("pilot_config.py", "show").stdout)
+        self.assertEqual((shown["tracker"], shown["issues_dir"], shown["landing"]),
+                         ("github", "issues", "pull_request"))
+
+    def test_the_environment_overrides_the_tracker(self):
+        self.write_config({"test_command": "true", "tracker": "github"})
+        self.assertEqual(self.get("tracker", env={"ISSUE_PILOT_TRACKER": "local"}), "local")
+
+    def test_check_refuses_an_unknown_tracker(self):
+        self.write_config({"test_command": "true", "tracker": "jira"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("tracker", out.stderr)
+        self.assertIn("jira", out.stderr)
+
+    def test_check_refuses_an_unknown_landing(self):
+        self.write_config({"test_command": "true", "landing": "yolo"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("landing", out.stderr)
+
+    def test_check_refuses_an_issues_dir_that_leaves_the_repository(self):
+        for bad in ("/tmp/issues", "../issues", "a/../../b", "", "  ", 7):
+            with self.subTest(issues_dir=bad):
+                self.write_config({"test_command": "true", "issues_dir": bad})
+                out = self.check()
+                self.assertEqual(out.returncode, 1)
+                self.assertIn("issues_dir", out.stderr)
+
+    def test_check_accepts_the_valid_values(self):
+        for landing in ("pull_request", "merge", "push", "branch"):
+            self.write_config({"test_command": "true", "tracker": "local",
+                               "issues_dir": "docs/tickets", "landing": landing})
+            self.assertEqual(self.check().returncode, 0, landing)
+
     def test_detect_proposes_the_projects_own_test_command(self):
         (self.repo / "Makefile").write_text("test:\n\tpytest\n")
         proposal = json.loads(self.run_script("pilot_config.py", "detect").stdout)

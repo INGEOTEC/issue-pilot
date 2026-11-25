@@ -51,8 +51,32 @@ DEFAULTS = {
     "max_attempts": (3, "Attempts on one issue before the run stops."),
     "pr_draft": (False, "Open the final pull request as a draft."),
     "issue_labels": ([], "Labels applied to issues opened by /issue-pilot:plan."),
+    "tracker": ("github", "Where issues live: github, or local (markdown files under issues_dir)."),
+    "issues_dir": ("issues", "Directory, relative to the repository root, that holds the issues when tracker is local."),
+    "landing": ("pull_request", "How a finished run reaches the base branch: pull_request (GitHub), merge, push or branch."),
     "watch": (True, "After /issue-pilot:run and /issue-pilot:fix detach the driver, wait in the background and report when it stops."),
 }
+
+TRACKERS = ("github", "local")
+LANDINGS = ("pull_request", "merge", "push", "branch")
+
+
+def issues_dir_problem(value):
+    """Why `value` cannot be `issues_dir`, or None.
+
+    The directory is created, written and `git add`ed by the tracker, so it has
+    to stay inside the repository: an absolute path or a `..` would let a typo
+    write (and commit) somewhere else.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "must be a non-empty path relative to the repository root"
+    path = pathlib.PurePosixPath(value.replace("\\", "/"))
+    if path.is_absolute() or pathlib.PureWindowsPath(value).is_absolute():
+        return "must be relative to the repository root, not absolute (%s)" % value
+    if ".." in path.parts:
+        return "must not contain a `..` component (%s)" % value
+    return None
+
 
 # Where run state and logs live.  Not part of the per-repo config: it is a
 # property of the machine, so only the environment moves it.
@@ -291,6 +315,16 @@ def validate(root=None):
         # nothing, and the same typo found mid-run costs the run.
         problems.append("%s: unknown setting(s) %s; known settings are %s"
                         % (path, ", ".join(unknown), ", ".join(sorted(DEFAULTS))))
+    if "tracker" in data and data["tracker"] not in TRACKERS:
+        problems.append("%s: tracker is %r; it must be one of %s"
+                        % (path, data["tracker"], ", ".join(TRACKERS)))
+    if "landing" in data and data["landing"] not in LANDINGS:
+        problems.append("%s: landing is %r; it must be one of %s"
+                        % (path, data["landing"], ", ".join(LANDINGS)))
+    if "issues_dir" in data:
+        problem = issues_dir_problem(data["issues_dir"])
+        if problem:
+            problems.append("%s: issues_dir %s" % (path, problem))
     if not str(data.get("test_command") or "").strip():
         problems.append(
             "%s: test_command is not set. An unattended session has to know what "

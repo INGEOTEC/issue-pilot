@@ -476,6 +476,9 @@ Every setting can be overridden for a single run by an environment variable
 | `max_attempts` | `3` | Attempts on one issue before the run stops. |
 | `pr_draft` | `false` | Open the final pull request as a draft. |
 | `issue_labels` | `[]` | Labels applied to issues opened by `/issue-pilot:plan`. |
+| `tracker` | `github` | Where issues live: `github`, or `local` (markdown files under `issues_dir`). |
+| `issues_dir` | `issues` | Directory, relative to the repository root, that holds the issues when `tracker` is `local`. |
+| `landing` | `pull_request` | How a finished run reaches the base branch: `pull_request` (GitHub), `merge`, `push` or `branch`. |
 | `watch` | `true` | After `/issue-pilot:run` and `/issue-pilot:fix` detach the driver, wait in the background and tell the conversation when it stops. `false` turns it off. |
 
 `ISSUE_PILOT_HOME` (default `~/.claude/issue-pilot`) is where state and logs live.

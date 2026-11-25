@@ -26,7 +26,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import issues_plan  # noqa: E402
+import issues_tracker  # noqa: E402
 import pilot_config  # noqa: E402
 
 STAMP = re.compile(r"Planned against `(?P<branch>[^`\n]+)` at `(?P<commit>[0-9a-f]{7,40})`")
@@ -87,7 +87,7 @@ def cmd_drift(args):
 
     report = []
     for n in args.issues:
-        issue = issues_plan.gh_issue(args.repo, n)
+        issue = issues_tracker.fetch(n, args.repo)
         entry = {"issue": n, "title": issue.get("title", "")}
         entry.update(drift_of(parse(issue.get("body")), tip, branch))
         report.append(entry)
