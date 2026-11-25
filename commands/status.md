@@ -39,7 +39,9 @@ What the next step is:
   the same pull request, so there is no need to decide between them; a fix
   can be added and applied as many times as review turns up findings.
 - `pull_request` is recorded: point at it and, if it is not merged into the
-  default branch, at `/issue-pilot:close` once it is.
+  default branch, at `/issue-pilot:close` once it is. The record may be a
+  landing other than a pull request (merge, push, branch): relay the `landed`
+  line, and `/issue-pilot:close` when it says the issues stay open.
 
 Do not implement anything, do not modify the run state, and do not wait for a
 running driver to finish — report where it is and stop.

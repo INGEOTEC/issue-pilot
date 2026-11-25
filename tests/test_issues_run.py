@@ -515,6 +515,10 @@ class Run(PilotTestCase):
         report = self.run_script("issues_state.py", "report").stdout
         self.assertIn("issues-1-2", report)
         self.assertNotIn("issues-9", report)
+        # The driver may still be going.  Let it finish before the temporary
+        # repository is removed: a driver still writing git objects under it
+        # makes the cleanup fail with "Directory not empty" every so often.
+        self.wait_for_exit(self.pointer()["pid"], self.home / "logs" / "issues-1-2")
 
     def test_a_detach_whose_driver_dies_before_initialising_fails(self):
         self._git("remote", "set-url", "origin", "/nonexistent")
@@ -681,6 +685,117 @@ class FixRuns(Run):
         self.run_driver("--no-interview", "1", check=True)
         out = self.run_driver("--fix", "--plan-only")
         self.assertEqual(out.returncode, 2)
+
+
+class LocalTracker(PilotTestCase):
+    """With `tracker: local` the driver never needs GitHub for the issues."""
+
+    def setUp(self):
+        super().setUp()
+        # A `gh` that fails whenever it is called: any call the driver or the
+        # prompts still make to GitHub shows up as a failure, not a pass.
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\necho 'gh must not be called with a local tracker' >&2\nexit 1\n")
+        gh.chmod(0o755)
+        issues = self.repo / "issues"
+        issues.mkdir()
+        (issues / "0001-first.md").write_text("# First\n\nIndependent.\n")
+        (issues / "0002-second.md").write_text("# Second\n\nBuilds on #1.\n")
+        # Local issues alone still land through a pull request, which is
+        # GitHub's: `landing: merge` is what makes the project need no `gh`.
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
+        self._git("add", "issues")
+        self._git("commit", "-qm", "add issues")
+        self._git("push", "-q", "origin", "main")
+
+    def state(self):
+        return json.loads(self.run_script("issues_state.py", "show").stdout)
+
+    def test_a_run_over_local_issues_completes_without_gh(self):
+        self.run_driver("--no-interview", "1", "2", check=True)
+        state = self.state()
+        self.assertEqual(state["status"], {"1": "done", "2": "done"})
+        deps = {p["issue"]: p["depends_on"] for p in state["plan"]}
+        self.assertEqual(deps, {1: [], 2: [1]})
+
+    def test_a_run_with_no_remote_is_cut_from_the_local_base(self):
+        # Nothing to fetch and nobody to ask: the local base branch is the
+        # reference, and the messages do not claim an origin.
+        self._git("remote", "remove", "origin")
+        out = self.run_driver("--no-interview", "1", "2", check=True)
+        self.assertEqual(self.state()["status"], {"1": "done", "2": "done"})
+        self.assertEqual(self.git("merge-base", "issues-1-2", "main"), self.git("rev-parse", "main"))
+        self.assertIn("the local main", out.stdout)
+        self.assertNotIn("origin", out.stdout)
+
+    def test_a_failed_start_with_no_remote_does_not_blame_origin(self):
+        self._git("remote", "remove", "origin")
+        (self.repo / "scratch.txt").write_text("dirty\n")
+        out = self.run_driver("--no-interview", "1")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn("origin", out.stderr)
+
+    def test_plan_only_works_over_local_issues(self):
+        out = self.run_driver("--plan-only", "1", "2", check=True)
+        self.assertIn("depends on #1", out.stdout)
+
+    def test_the_session_prompt_reads_issues_through_the_tracker(self):
+        self.run_driver("--no-interview", "1", check=True)
+        call = self.claude_calls()[0]
+        prompt = call[call.index("-p") + 1]
+        self.assertIn('scripts/issues_tracker.py" view', prompt)
+        self.assertNotIn("gh issue", prompt)
+
+
+class GitHubPrerequisites(PilotTestCase):
+    """`gh` stays mandatory, and checked first-hand, when the issues are on GitHub."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_issues({1: issue(1, "first")})
+        self.write_config({"test_command": "true"})
+        self._git("push", "-q", "origin", "main")
+
+    def test_a_missing_gh_stops_the_run(self):
+        # A PATH with the stubs, git, python3 and bash, and no gh.
+        tools = self.repo.parent / "tools"
+        tools.mkdir()
+        for name in ("git", "python3", "bash", "env", "dirname", "sed", "grep", "cat",
+                     "awk", "date", "tr", "head", "cut", "uname", "basename", "readlink"):
+            found = shutil.which(name)
+            if found:
+                (tools / name).symlink_to(found)
+        gh = self.bindir / "gh"
+        gh.unlink()
+        out = self.run_driver("--no-interview", "1", env={"PATH": "%s:%s" % (self.bindir, tools)})
+        self.assertEqual(out.returncode, 78)
+        self.assertIn("`gh` is not installed or not on PATH", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_an_unauthenticated_gh_stops_the_run(self):
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\n[ \"$1\" = auth ] && exit 1\nexit 0\n")
+        gh.chmod(0o755)
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 78)
+        self.assertIn("`gh` is not authenticated; run `gh auth login`.", out.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_a_project_that_uses_no_github_does_not_ask_for_gh_authentication(self):
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
+        self._git("push", "-q", "origin", "main")
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\n[ \"$1\" = auth ] && exit 1\nexit 0\n")
+        gh.chmod(0o755)
+        (self.repo / "issues").mkdir()
+        (self.repo / "issues" / "0001-first.md").write_text("# first\n")
+        self._git("add", "issues")
+        self._git("commit", "-qm", "issue")
+        self._git("push", "-q", "origin", "main")
+        out = self.run_driver("--no-interview", "1")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
 
 
 if __name__ == "__main__":

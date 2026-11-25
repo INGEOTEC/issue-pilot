@@ -58,7 +58,7 @@ So:
    continue from there instead of redoing it. If a long process was left
    half-way, start it again and wait for it as described above.
 
-4. Read the issue (`gh issue view <n> --comments`), `CLAUDE.md` and the code it
+4. Read the issue (`python3 "{{ROOT}}/scripts/issues_tracker.py" view <n>`), `CLAUDE.md` and the code it
    touches. If `depends_on` is not empty, also read the commits of those issues
    (`git log --oneline` on the branch) — that is your only source about them.
 
@@ -74,21 +74,47 @@ So:
    (`CLAUDE.md`, `Makefile`, `pyproject.toml`, CI workflow) and say in the issue
    comment which one you used.
 
-6. **Only with everything green**, make a commit of your own for the issue:
-   `<summary> (issue #<n>)`, comment on the issue with
-   `gh issue comment <n> --body '...'` (what was implemented, branch, commit,
-   tests and their result, defaults you decided), and mark the issue finished:
+6. **Only with everything green**, finish in exactly this order — the order
+   matters:
 
-   ```bash
-   python3 "{{ROOT}}/scripts/issues_state.py" done <n> --commit "$(git rev-parse HEAD)"
-   ```
+   1. make a commit of your own for the issue: `<summary> (issue #<n>)`;
+   2. note that commit's hash now (`git rev-parse HEAD`). It is the hash to
+      report and to record, and the next step may add another commit on top of
+      it;
+   3. write the comment to a temporary file (what was implemented, branch, that
+      commit, tests and their result, defaults you decided) and post it:
+
+      ```bash
+      python3 "{{ROOT}}/scripts/issues_tracker.py" comment <n> --body-file <file>
+      ```
+
+   4. run, always, whatever the tracker is:
+
+      ```bash
+      python3 "{{ROOT}}/scripts/issues_tracker.py" commit -m 'Record the outcome of issue #<n>'
+      ```
+
+      It only does something when the issues are files versioned in this
+      repository, and then it keeps the comment from being left behind as an
+      uncommitted change; everywhere else it says there is nothing to commit.
+      It is never conditional here on purpose: a skipped conditional step would
+      leave a dirty tree, and an unconditional no-op cannot go wrong;
+   5. mark the issue finished, with the hash from sub-step 2 written out
+      literally — not `$(git rev-parse HEAD)`, which would now name the
+      comment's commit rather than the work's:
+
+      ```bash
+      python3 "{{ROOT}}/scripts/issues_state.py" done <n> --commit <hash>
+      ```
 
    Marking it `done` is the last step and it is mandatory: the driver only moves
    on if the state says so, not if you say so in prose.
 
 7. If you **cannot** finish it (red tests you cannot fix, or a real blocker):
-   touch nothing else, comment the blocker on the issue with the exact output,
-   and mark it explicitly:
+   touch nothing else, comment the blocker on the issue with the exact output
+   (`python3 "{{ROOT}}/scripts/issues_tracker.py" comment <n> --body-file <file>`), run
+   `python3 "{{ROOT}}/scripts/issues_tracker.py" commit -m 'Record the outcome of issue #<n>'` as in step 6, and
+   mark it explicitly:
 
    ```bash
    python3 "{{ROOT}}/scripts/issues_state.py" block <n> --reason '...'
@@ -110,16 +136,20 @@ done before redoing it, tests green before any commit — applies unchanged:
 - **Step 4 (the spec).** There is no issue to read. The full spec — what is
   wrong, where, the fix, how to check it, what is out of scope — is the `fix`
   object's `description`, already printed by `next`. If `depends_on` names
-  issues, read them (`gh issue view <n> --comments`) for context on the work the
+  issues, read them (`python3 "{{ROOT}}/scripts/issues_tracker.py" view <n>`) for context on the work the
   fix corrects.
 - **Step 6 (finishing).** The commit message is `<summary> (review fix-<k>: #4
   #3)`, naming the issues in `depends_on`, or `(review fix-<k>)` when it names
   none — say, in the commit or a one-line comment near the change, that this
   corrects a review finding found after the fact, so a later editor does not
-  mistake it for part of the original issue and remove it. Comment on **each**
-  issue named with what was corrected, the commit and the test result; when it
-  names none, there is nothing on GitHub to comment on. Mark it with
-  `issues_state.py done fix-<k> --commit "$(git rev-parse HEAD)"`.
+  mistake it for part of the original issue and remove it. Note the hash of
+  that commit before commenting. Comment on **each** issue named with what was
+  corrected, the commit and the test result (`python3 "{{ROOT}}/scripts/issues_tracker.py" comment <n> --body-file
+  <file>`); when it names none, there is nothing to comment on. Then run one
+  `python3 "{{ROOT}}/scripts/issues_tracker.py" commit -m 'Record the outcome of review fix-<k>'`
+  (always, as in step 6) and mark it with
+  `issues_state.py done fix-<k> --commit <hash>`, the hash of the fix's own
+  commit, not of the comment's.
 - **Step 7 (blocking).** `issues_state.py block fix-<k> --reason '...'`, same as
   for an issue — no GitHub comment, since a fix that names no issue has nowhere
   to put one.

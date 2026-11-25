@@ -13,6 +13,11 @@
 # here discards it -- the script stops and says what to do instead.  Likewise
 # it will not switch branches over a dirty tree.
 #
+# A repository with no remote (a project that has not been pushed anywhere, or
+# whose git is not reachable from here) has nothing to fetch: the local base
+# branch is taken as it is, and is the reference.  There is nothing for it to be
+# ahead of or behind.  Only a remote called `origin` counts.
+#
 #   base_sync.sh      sync, and print the commit the base branch is now at
 set -euo pipefail
 
@@ -33,6 +38,19 @@ $(sed 's/^/    /' <<<"$dirty")
     git stash pop         # afterwards
 MSG
   exit 2
+fi
+
+remote="$(python3 "$CONFIG" remote)"
+
+if [[ -z "$remote" ]]; then
+  if ! git show-ref --verify --quiet "refs/heads/$base"; then
+    echo "error: there is no branch $base here and no remote to get it from; set base_branch in .issue-pilot.json to a branch that exists." >&2
+    exit 2
+  fi
+  [[ "$(git rev-parse --abbrev-ref HEAD)" == "$base" ]] || git checkout --quiet "$base"
+  echo "on $base at $(git rev-parse --short HEAD) (no remote: the local branch is the reference)" >&2
+  git rev-parse HEAD
+  exit 0
 fi
 
 git fetch --quiet origin "$base" || {

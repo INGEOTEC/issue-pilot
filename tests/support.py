@@ -69,6 +69,7 @@ class PilotTestCase(unittest.TestCase):
             "FAKE_GH_ISSUES": str(self.issues_file),
             "FAKE_GH_DEFAULT_BRANCH": "main",
             "FAKE_GH_PR_LOG": str(root / "gh-pr.jsonl"),
+            "FAKE_GH_ISSUE_LOG": str(root / "gh-issues.jsonl"),
             "FAKE_CLAUDE_LOG": str(self.claude_log),
             "FAKE_CLAUDE_COUNTER": str(root / "claude-counter"),
             "FAKE_NOTIFY_LOG": str(root / "notify-send.log"),
@@ -81,6 +82,21 @@ class PilotTestCase(unittest.TestCase):
         for key in list(self.env):
             if key.startswith("ISSUE_PILOT_") and key != "ISSUE_PILOT_HOME":
                 del self.env[key]
+
+    def path_without_gh(self):
+        """A PATH with the stubs, git, python3, bash and coreutils, and no `gh`."""
+        tools = pathlib.Path(self.tmp.name) / "tools-without-gh"
+        tools.mkdir(exist_ok=True)
+        for name in ("git", "python3", "bash", "env", "dirname", "sed", "grep", "cat",
+                     "awk", "date", "tr", "head", "cut", "uname", "basename", "readlink",
+                     "mktemp", "rm"):
+            found = shutil.which(name)
+            if found and not (tools / name).exists():
+                (tools / name).symlink_to(found)
+        gh = self.bindir / "gh"
+        if gh.exists():
+            gh.unlink()
+        return "%s%s%s" % (self.bindir, os.pathsep, tools)
 
     def install_stub(self, name):
         target = self.bindir / name
@@ -145,5 +161,5 @@ class PilotTestCase(unittest.TestCase):
 
 
 def issue(number, title="t", body="", comments=()):
-    return {"number": number, "title": title, "body": body,
+    return {"number": number, "title": title, "body": body, "state": "OPEN",
             "comments": [{"body": c} for c in comments]}

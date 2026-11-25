@@ -18,7 +18,8 @@
 # The branch is derived from the issue list (`issues-165-166`) and created by
 # this script, right before the first issue is started, off the tip of the base
 # branch AS IT IS ON ORIGIN: the base branch is checked out, fetched and
-# fast-forwarded first, every time (base_sync.sh).  Whatever was checked out
+# fast-forwarded first, every time (base_sync.sh).  With no remote there is
+# nothing to fetch and the local base branch is the reference.  Whatever was checked out
 # before does not come into it: the run has to start from what everybody else
 # has.  A local base branch with commits origin does not have stops the run
 # rather than being reset -- those are somebody's unpushed work.  --from-head is
@@ -105,14 +106,24 @@ if [[ $FIX -eq 1 && ( ${#ARGS[@]} -gt 0 || $RESUME -eq 1 || $PLAN_ONLY -eq 1 ) ]
 fi
 
 # --------------------------------------------------------------- prerequisites
-for tool in git gh claude python3; do
+for tool in git claude python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "error: \`$tool\` is not installed or not on PATH." >&2; exit 78; }
 done
-gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; run \`gh auth login\`." >&2; exit 78; }
 
 # The project's configuration is not optional.  A run has nobody to ask what
 # green means, so it is decided once, in writing, before anything starts.
 python3 "$CONFIG" check >/dev/null || exit 78
+
+# `gh` is needed only when the project uses GitHub, for its issues or for the
+# pull request that lands the run (pilot_config.py uses-github); a project that
+# keeps its issues as files and merges locally must be able to run on a machine
+# that has never heard of it.  This is after the configuration check because
+# both settings are read from it.  An empty answer is the default, yes.
+USES_GITHUB="$(python3 "$CONFIG" uses-github 2>/dev/null || true)"
+if [[ "$USES_GITHUB" != no ]]; then
+  command -v gh >/dev/null 2>&1 || { echo "error: \`gh\` is not installed or not on PATH." >&2; exit 78; }
+  gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; run \`gh auth login\`." >&2; exit 78; }
+fi
 
 # The per-issue sessions (first attempts of --resume and --fix included) are
 # started from a prompt file the driver owns, not from a slash command: nobody
@@ -442,12 +453,21 @@ if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
   else
     # base_sync.sh checks the base branch out and fast-forwards it to origin,
     # refusing a dirty tree, an unreachable origin and a local base branch that
-    # is ahead of origin.  It prints the commit the base is now at.
+    # is ahead of origin.  It prints the commit the base is now at.  With no
+    # remote it takes the local base branch as it is, so these messages must not
+    # claim an origin that is not there.
+    if [[ -n "$(python3 "$CONFIG" remote)" ]]; then
+      BASE_WHERE="the tip of origin/$BASE"
+      START_FROM="origin"
+    else
+      BASE_WHERE="the local $BASE"
+      START_FROM="the base branch"
+    fi
     BASE_COMMIT="$(bash "$SCRIPTS/base_sync.sh")" || {
-      echo "       The run starts from origin, not from what is checked out; pass --from-head to start from HEAD on purpose." >&2
+      echo "       The run starts from $START_FROM, not from what is checked out; pass --from-head to start from HEAD on purpose." >&2
       exit 1
     }
-    echo "creating branch $BRANCH off $BASE ($(git rev-parse --short "$BASE_COMMIT"), the tip of origin/$BASE)"
+    echo "creating branch $BRANCH off $BASE ($(git rev-parse --short "$BASE_COMMIT"), $BASE_WHERE)"
     git checkout --quiet --no-track -b "$BRANCH" "$BASE"
   fi
 fi
@@ -473,7 +493,7 @@ This is the ONLY chance to ask me anything in the whole run: after this session
 nobody will be watching.
 
 1. Read EVERY issue in the list, start to finish, with
-   \`gh issue view <n> --comments\`, in the order given. All of them, not just
+   \`python3 "$SCRIPTS/issues_tracker.py" view <n>\`, in the order given. All of them, not just
    the first one.
 2. Read CLAUDE.md and the code each issue touches, enough to know whether the
    issue is implementable as written.
@@ -687,7 +707,11 @@ if [[ $OPEN_PR -eq 1 ]]; then
     --session-id "$(new_session)" \
     --append-system-prompt "$AUTONOMY_RULES" 2>&1 | tee "$LOGDIR/pull-request.log"
 else
-  echo "all issues implemented; open the pull request with: /issue-pilot:pr"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "all issues implemented; open the pull request with: /issue-pilot:pr"
+  else
+    echo "all issues implemented; finish the run with: /issue-pilot:pr"
+  fi
 fi
 
 # ------------------------------------------------------------ where the tree is left
@@ -715,7 +739,11 @@ return_to_base() {
       return 0
     }
   fi
-  echo "pull request opened; back on $BASE, the work is on branch $BRANCH"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "pull request opened; back on $BASE, the work is on branch $BRANCH"
+  else
+    echo "run landed; back on $BASE, the work is on branch $BRANCH"
+  fi
 }
 
 pull_request_recorded() {
@@ -726,7 +754,15 @@ if [[ $OPEN_PR -eq 1 ]] && pull_request_recorded; then
   return_to_base
 else
   if [[ $OPEN_PR -eq 1 ]]; then
-    echo "no pull request was recorded; open it with /issue-pilot:pr" >&2
+    if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+      echo "no pull request was recorded; open it with /issue-pilot:pr" >&2
+    else
+      echo "no landing was recorded; finish the run with /issue-pilot:pr" >&2
+    fi
   fi
-  echo "the work is on branch $BRANCH, checked out for review; /issue-pilot:pr opens the pull request and returns to ${BASE:-the base branch}"
+  if [[ "$(cfg landing)" == pull_request || -z "$(cfg landing)" ]]; then
+    echo "the work is on branch $BRANCH, checked out for review; /issue-pilot:pr opens the pull request and returns to ${BASE:-the base branch}"
+  else
+    echo "the work is on branch $BRANCH, checked out for review; finish the run with /issue-pilot:pr, which lands it and returns to ${BASE:-the base branch}"
+  fi
 fi

@@ -1,9 +1,11 @@
 # issue-pilot
 
-Turn a list of GitHub issues into one reviewed pull request, unattended.
+Turn a list of issues into one reviewed pull request, unattended — on GitHub,
+or without it (see [Without GitHub](#without-github)).
 
 `issue-pilot` is a [Claude Code](https://claude.com/claude-code) plugin for a
-specific way of working: you write down what you want as a GitHub issue, and
+specific way of working: you write down what you want as an issue (on GitHub,
+or a markdown file in the project), and
 then a Claude Code run implements it — reading the issue, writing the code and
 the tests, committing, commenting on the issue, and moving on to the next one.
 
@@ -68,7 +70,9 @@ cd issue-pilot
 ```
 
 **Requirements:** `git`, `python3` (3.10+, standard library only), the
-[GitHub CLI](https://cli.github.com) authenticated (`gh auth login`), `curl`,
+the [GitHub CLI](https://cli.github.com) authenticated (`gh auth login`) unless
+the project uses no GitHub at all (`tracker` `local` and a `landing` other than
+`pull_request`), `curl`,
 and a `claude` that can start subprocesses of its own — run `claude setup-token`
 once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is
 not enough: that token is not passed to subprocesses, and the driver launches
@@ -141,7 +145,7 @@ process of its own — so finish or kill it first.
 ```
   /issue-pilot:init        ->  .issue-pilot.json, once per repository
               |
-  /issue-pilot:plan  ->  a well-formed issue on GitHub
+  /issue-pilot:plan  ->  a well-formed issue (on GitHub, or a file)
               |
   /issue-pilot:run 165 166 170
               |
@@ -160,6 +164,7 @@ process of its own — so finish or kill it first.
               branch, as many times as review turns anything up (optional)
               |
      the close: /issue-pilot:pr  ->  one pull request, Closes #165 #166 #170
+              (or, without GitHub, the run landed the way `landing` says)
               |
               |  (only if the base branch is not the repository's default one)
               v
@@ -177,10 +182,13 @@ inspects the project, proposes a configuration, and asks you to confirm it. The
 proposal is often nearly right and occasionally wrong in a way only a person
 notices: a repository whose tests live in `tests/test_*.py` but are written with
 `unittest` gets offered `pytest -q`. Everything else starts from the base branch
-as it is on origin, so init does not commit the file locally: it opens a pull
-request against the base branch with the configuration and offers to merge it
-right away. If you decline, or GitHub wants a review first, `/issue-pilot:plan`
-and `/issue-pilot:run` refuse until it is merged and the base pulled.
+as it is on origin, so init does not commit the file locally: on GitHub it opens
+a pull request against the base branch with the configuration and offers to
+merge it right away. If you decline, or GitHub wants a review first,
+`/issue-pilot:plan` and `/issue-pilot:run` refuse until it is merged and the
+base pulled. In a project with a git of its own, init asks the extra questions of
+[Without GitHub](#without-github) and commits the file straight to the base
+branch, or keeps it out of git.
 
 Then write the issue:
 
@@ -459,8 +467,9 @@ prints `{"error": ...}` instead, and the guard lets every call through.
 deliberate: an unattended run has nobody to ask what "green" means and no way to
 tell you it guessed wrong. `test_command` is the one setting with no sensible
 fallback, so it is the one the check insists on; a project with no tests can set
-it to a command that exits 0. The file has to be on the base branch on origin,
-which is what init arranges.
+it to a command that exits 0. The file has to be on the base branch (on origin,
+when there is one), which is what init arranges — unless you chose to keep it
+out of git, see [Without GitHub](#without-github).
 
 Every setting can be overridden for a single run by an environment variable
 (`ISSUE_PILOT_TEST_COMMAND`, `ISSUE_PILOT_MODEL`, ...). See
@@ -468,7 +477,7 @@ Every setting can be overridden for a single run by an environment variable
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `base_branch` | the repository's default branch on GitHub | Branch a run starts from and its pull request targets. |
+| `base_branch` | the repository's default branch on GitHub, when it is on GitHub | Branch a run starts from and its pull request or landing targets. Required without GitHub. |
 | `branch_prefix` | `issues` | The issue numbers are appended: `issues-165-166`. |
 | `test_command` | inferred from the project | The suite that has to be green before a commit. |
 | `model` | `sonnet` | Model every autonomous session runs on, whatever your interactive default is. |
@@ -476,6 +485,9 @@ Every setting can be overridden for a single run by an environment variable
 | `max_attempts` | `3` | Attempts on one issue before the run stops. |
 | `pr_draft` | `false` | Open the final pull request as a draft. |
 | `issue_labels` | `[]` | Labels applied to issues opened by `/issue-pilot:plan`. |
+| `tracker` | `github` | Where issues live: `github`, or `local` (markdown files under `issues_dir`). |
+| `issues_dir` | `issues` | Directory, relative to the repository root, that holds the issues when `tracker` is `local`. |
+| `landing` | `pull_request` | How a finished run reaches the base branch: `pull_request` (GitHub), `merge`, `push` or `branch`. |
 | `watch` | `true` | After `/issue-pilot:run` and `/issue-pilot:fix` detach the driver, wait in the background and tell the conversation when it stops. `false` turns it off. |
 
 `ISSUE_PILOT_HOME` (default `~/.claude/issue-pilot`) is where state and logs live.
@@ -484,14 +496,14 @@ Every setting can be overridden for a single run by an environment variable
 
 | Command | What it does |
 |---|---|
-| `/issue-pilot:init` | Configures issue-pilot for this repository and opens the pull request that lands it. Run it once, before anything else. |
-| `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue. `--update <n>` rewrites an existing one. |
+| `/issue-pilot:init` | Configures issue-pilot for this repository, asking where issues live and how runs land, and lands the configuration (a pull request on GitHub, a direct commit otherwise, or nothing when it is kept out of git). Run it once, before anything else. |
+| `/issue-pilot:plan <idea>` | Interviews you and opens a well-formed implementation issue (on GitHub, or a markdown file). `--update <n>` rewrites an existing one. |
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background and tells the conversation when it stops (`"watch": false` turns that off). |
 | `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
 | `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). Refuses, and suggests `/issue-pilot:plan`, when there is no run, or its pull request is already open. |
-| `/issue-pilot:pr` | Opens the single pull request, if every issue is done. |
-| `/issue-pilot:close` | Closes the issues by hand once the pull request is merged, when GitHub will not. |
+| `/issue-pilot:pr` | Opens the single pull request, if every issue is done, or lands the run the way `landing` says. |
+| `/issue-pilot:close` | Closes the issues by hand once the work is merged, when nothing closed them already. |
 
 The driver underneath, for the times you want it directly:
 
@@ -540,6 +552,107 @@ After the merge:
 which checks the pull request really is merged, comments on each issue with the
 pull request and the commit that implemented it, and closes it. It refuses to
 close anything for an unmerged pull request unless you pass `--force`.
+
+With a local tracker, or with `landing: merge`, the issues are closed when the
+run lands and `/issue-pilot:close` has nothing to do. With `landing: push` or
+`branch` on a GitHub tracker, it is what closes them once you have merged the
+branch.
+
+## Without GitHub
+
+issue-pilot also works in a project that cannot be on GitHub and has a git of its
+own: a paper whose only remote is Overleaf's git, a repository on a self-hosted
+server, or one with no remote at all. `/issue-pilot:init` looks at where
+`origin` points (offline, from its URL), and when it is not GitHub it proposes
+`tracker: local` and `landing: merge` and asks the questions below. Two
+independent settings decide everything:
+
+- **`tracker`** — where issues live: `github` (the default), or `local`,
+  markdown files in `issues_dir` (default `issues`).
+- **`landing`** — how a finished run reaches the base branch:
+
+| `landing` | what `/issue-pilot:pr` does |
+|---|---|
+| `pull_request` | Pushes the run branch and opens a GitHub pull request. The default. |
+| `merge` | Brings the base into the run branch if it moved, runs the tests, then makes the base equal to the run branch: pushed to `origin` *as* the base branch when there is a remote, a local fast-forward when there is none. The run branch itself is never pushed. This is the one for a single-branch remote such as Overleaf's. |
+| `push` | Runs the tests and pushes the run branch to `origin`; you merge it on your server. |
+| `branch` | Runs the tests and leaves the branch for you to merge by hand. |
+
+Nothing is rebased or force-pushed in any landing, so the remote's base only ever
+moves forward. Without GitHub, `base_branch` has to be set (there is no default
+branch to ask for), and `gh` is not needed.
+
+### Local issues
+
+One file per issue, `issues/NNNN-<slug>.md`, the number zero-padded to four
+digits. The file is the issue's whole history, comments included:
+
+```markdown
+---
+number: 7
+title: Add a --format flag to the export command
+state: open
+created: 2026-11-25
+closed:
+labels: bug, export
+---
+
+The body, in markdown.
+
+<!-- issue-pilot:comment 2026-11-25T18:03:11Z -->
+
+The first comment.
+```
+
+The header is plain `key: value` lines (no YAML), the marker is an HTML comment
+so markdown renderers hide it. A file you write by hand, with no header at all, is
+accepted: its number is the leading digits of its name, its title the first `# `
+heading, and it is open. `#N` mentions between issues decide which of them share a
+conversation exactly as on GitHub. Closed issues stay where they are with
+`state: closed`. Issues are closed when the run lands (`/issue-pilot:close` has
+nothing to do); everything goes through `scripts/issues_tracker.py`, which you can
+also call yourself (`view`, `list`, `create`, `comment`, `close`).
+
+### Versioned or ignored
+
+`/issue-pilot:init` asks, separately for `.issue-pilot.json` and for the issues
+directory, whether each is **versioned** in the project's git or **ignored**.
+Ignoring uses `.git/info/exclude`, the clone-local ignore file: unlike
+`.gitignore` it is not a versioned file, so choosing it changes nothing in the
+repository.
+
+- **Versioned** is shared and travels with the repository, but it is a visible
+  commit on the base branch: `/issue-pilot:plan` commits and pushes every new
+  issue there, and the landing commits the closed ones. In an Overleaf project
+  every versioned file shows up in everybody's file tree.
+- **Ignored** leaves no trace, but exists only in this clone and has to be
+  recreated in the next. Without GitHub this is the recommendation.
+
+To switch later, by hand: to ignore something that is versioned,
+`git rm -r --cached <path>`, commit, then
+`python3 scripts/pilot_config.py exclude <path>`; to version something ignored,
+delete its line from `.git/info/exclude` and `git add` it. `pilot_config.py
+tracking <path>` says which one a path is right now.
+
+### A walkthrough: an Overleaf project
+
+1. Clone the project from Overleaf (`git clone https://git.overleaf.com/<id>`).
+2. `/issue-pilot:init`: local issues, landing `merge`, and both the configuration
+   and the issues ignored. Nothing is committed.
+3. `/issue-pilot:plan make the introduction shorter` writes `issues/0001-...md`,
+   in this clone only.
+4. `/issue-pilot:run 1` implements it on a branch, unattended.
+5. `/issue-pilot:pr` merges the base into the branch if someone edited the
+   document meanwhile, runs the tests, pushes the branch as the base, and closes
+   the issue.
+
+What arrives in Overleaf is the commits of the run on the document's history, and
+nothing else.
+
+### Not supported
+
+Merge requests on other forges (GitLab, Gitea), and a remote that is not named
+`origin`.
 
 ## Writing issues it can implement
 

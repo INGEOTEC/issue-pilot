@@ -24,8 +24,9 @@ issue to a session that has **nobody to ask** — so everything that session wil
 need has to be decided here, while you still have a person in front of you.
 
 If `$ARGUMENTS` starts with `--update`, load the issue that follows with
-`gh issue view <n> --comments` and rewrite it into the shape below instead of
-creating a new one, preserving anything already agreed in its comments.
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" view <n>` and rewrite it into the shape below instead of
+creating a new one, preserving anything already agreed in its comments. (How
+the rewritten issue is saved is in step 5.)
 
 ## 0. Refuse to start unconfigured
 
@@ -50,6 +51,9 @@ against that commit and nothing else: not a feature branch that happened to be
 checked out, not a base branch that fell behind while something else was being
 worked on. A plan written against either is a plan for the wrong codebase.
 
+In a repository with no remote there is nothing to fetch: the local base branch
+is the reference, and is taken as it is.
+
 If it refuses, **stop** and repeat its message to the user: a dirty tree
 (suggest `git stash -u`, and `git stash pop` afterwards), a base branch with
 commits origin does not have, or an origin that cannot be reached. Do not fall
@@ -63,7 +67,7 @@ could have looked up:
 - `CLAUDE.md` and the project's conventions (tests, layout, style, base branch).
 - The code the change touches: where it would live, what already does something
   similar, what would have to change with it.
-- The existing issues that overlap: `gh issue list --search '<keywords>' --state all`.
+- The existing issues that overlap: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" list --state all --search '<keywords>'`.
 - `.issue-pilot.json`, for the test command and base branch the issue must
   name.
 
@@ -141,19 +145,41 @@ history".
 ## 5. Create it
 
 ```bash
-gh issue create --title '<imperative, specific, under ~70 chars>' --body-file <file>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" create \
+    --title '<imperative, specific, under ~70 chars>' --body-file <file>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" commit --push \
+    -m 'Add issue <n>: <title>'
 ```
 
-Add labels from `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get issue_labels`
-if it prints any. Write the body to a temporary file rather than passing it
-inline: bodies with backticks and newlines do not survive shell quoting.
+`create` prints two lines: the issue's number, and where it is (a URL on
+GitHub, a file path for a local tracker). `commit --push` is always run and
+usually does nothing: when the issues are markdown files versioned in the
+repository it commits the new file on the base branch and pushes it, because
+everything else starts from a clean base branch that matches the remote. If it
+exits non-zero, report its message and stop.
+
+Add `--label <l>` to `create` for each label that
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get issue_labels`
+prints (comma-separated), if it prints any. Write the body to a temporary file
+rather than passing it inline: bodies with backticks and newlines do not
+survive shell quoting.
+
+**`--update` on an existing issue.** The tracker has no "edit the body"
+operation, so this is the one place that branches on `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" kind`:
+
+- `github`: `gh issue edit <n> --body-file <file>`.
+- `local`: edit the issue's markdown file directly — it is the one in the
+  directory `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pilot_config.py" get issues_dir`
+  prints, named `<NNNN>-<slug>.md` — keeping its header and its comments, and
+  then run the same `commit --push`, with the message
+  `Update issue <n>: <title>`.
 
 If the work was split, create the issues in dependency order and cross-reference
 them as described above.
 
 ## 6. Report
 
-Print the issue URLs and the exact command to implement them:
+Print what `create` printed for each issue (the URL or the path) and the exact command to implement them:
 
 ```
 /issue-pilot:run <n> [<n> ...]

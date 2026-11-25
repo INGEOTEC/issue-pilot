@@ -122,6 +122,109 @@ class Configuration(PilotTestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("not valid JSON", out.stderr)
 
+    def test_the_tracker_settings_have_their_defaults(self):
+        self.assertEqual(self.get("tracker"), "github")
+        self.assertEqual(self.get("issues_dir"), "issues")
+        self.assertEqual(self.get("landing"), "pull_request")
+        shown = json.loads(self.run_script("pilot_config.py", "show").stdout)
+        self.assertEqual((shown["tracker"], shown["issues_dir"], shown["landing"]),
+                         ("github", "issues", "pull_request"))
+
+    def test_the_environment_overrides_the_tracker(self):
+        self.write_config({"test_command": "true", "tracker": "github"})
+        self.assertEqual(self.get("tracker", env={"ISSUE_PILOT_TRACKER": "local"}), "local")
+
+    def test_check_refuses_an_unknown_tracker(self):
+        self.write_config({"test_command": "true", "tracker": "jira"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("tracker", out.stderr)
+        self.assertIn("jira", out.stderr)
+
+    def test_check_refuses_an_unknown_landing(self):
+        self.write_config({"test_command": "true", "landing": "yolo"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("landing", out.stderr)
+
+    def test_check_refuses_an_issues_dir_that_leaves_the_repository(self):
+        for bad in ("/tmp/issues", "../issues", "a/../../b", "", "  ", 7):
+            with self.subTest(issues_dir=bad):
+                self.write_config({"test_command": "true", "issues_dir": bad})
+                out = self.check()
+                self.assertEqual(out.returncode, 1)
+                self.assertIn("issues_dir", out.stderr)
+
+    def test_check_accepts_the_valid_values(self):
+        for landing in ("pull_request", "merge", "push", "branch"):
+            self.write_config({"test_command": "true", "tracker": "local",
+                               "issues_dir": "docs/tickets", "landing": landing,
+                               "base_branch": "main"})
+            self.assertEqual(self.check().returncode, 0, landing)
+
+    def fake_gh_that_logs(self):
+        """A `gh` that records any call and fails; returns the log's path."""
+        log = self.repo.parent / "gh-calls.log"
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\necho \"$@\" >> %s\nexit 1\n" % log)
+        gh.chmod(0o755)
+        return log
+
+    def test_uses_github_for_the_three_configurations(self):
+        def uses():
+            return self.run_script("pilot_config.py", "uses-github").stdout.strip()
+        self.assertEqual(uses(), "yes")
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self.assertEqual(uses(), "yes")
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        self.assertEqual(uses(), "no")
+        self.write_config({"test_command": "true", "tracker": "github", "landing": "merge"})
+        self.assertEqual(uses(), "yes")
+
+    def test_remote_prints_origin_only_when_it_exists(self):
+        self.assertEqual(self.run_script("pilot_config.py", "remote").stdout, "origin\n")
+        self._git("remote", "remove", "origin")
+        out = self.run_script("pilot_config.py", "remote")
+        self.assertEqual((out.returncode, out.stdout), (0, ""))
+
+    def test_without_github_the_base_branch_never_calls_gh(self):
+        log = self.fake_gh_that_logs()
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "release"})
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "release")
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        self._git("checkout", "-q", "-b", "wip")
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "wip")
+        out = self.run_script("pilot_config.py", "default-branch")
+        self.assertEqual(out.stdout, "\n")
+        self.assertFalse(log.exists() and log.read_text())
+
+    def test_with_github_a_gh_that_cannot_answer_falls_back_to_head(self):
+        log = self.fake_gh_that_logs()
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "main")
+        self.assertTrue(log.read_text())
+
+    def test_check_wants_a_base_branch_when_there_is_no_github(self):
+        problem = "base_branch is not set, and without GitHub there is nothing to ask for a default"
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn(problem, out.stderr)
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "  "})
+        self.assertIn(problem, self.check().stderr)
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
+        self.assertEqual(self.check().returncode, 0)
+        # With GitHub there is a default to ask for, so nothing is missing.
+        self.write_config({"test_command": "true"})
+        self.assertEqual(self.check().returncode, 0)
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self.assertEqual(self.check().returncode, 0)
+
     def test_detect_proposes_the_projects_own_test_command(self):
         (self.repo / "Makefile").write_text("test:\n\tpytest\n")
         proposal = json.loads(self.run_script("pilot_config.py", "detect").stdout)
@@ -152,6 +255,184 @@ class Configuration(PilotTestCase):
     def test_state_lives_under_issue_pilot_home(self):
         out = self.run_script("pilot_config.py", "path")
         self.assertTrue(out.stdout.strip().startswith(str(self.home)))
+
+
+GITHUB_URL = "https://github.com/example/repo.git"
+OVERLEAF_URL = "https://git.overleaf.com/abc123"
+
+
+class Hosting(PilotTestCase):
+    """Where the remote is, judged offline, and what init proposes because of it."""
+
+    def setUp(self):
+        super().setUp()
+        self.gh_log = self.repo.parent / "gh-calls.log"
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\necho \"$@\" >> %s\nexit 1\n" % self.gh_log)
+        gh.chmod(0o755)
+
+    def hosting(self):
+        return json.loads(self.run_script("pilot_config.py", "hosting").stdout)
+
+    def detect(self):
+        return json.loads(self.run_script("pilot_config.py", "detect").stdout)
+
+    def no_gh_call(self):
+        self.assertFalse(self.gh_log.exists() and self.gh_log.read_text())
+
+    def test_a_github_url(self):
+        self._git("remote", "set-url", "origin", GITHUB_URL)
+        self.assertEqual(self.hosting(), {"origin": True, "github": True})
+
+    def test_any_other_url(self):
+        self._git("remote", "set-url", "origin", OVERLEAF_URL)
+        self.assertEqual(self.hosting(), {"origin": True, "github": False})
+
+    def test_no_remote(self):
+        self._git("remote", "remove", "origin")
+        self.assertEqual(self.hosting(), {"origin": False, "github": False})
+        self.no_gh_call()
+
+    def test_detect_proposes_github_and_a_pull_request_on_github(self):
+        self._git("remote", "set-url", "origin", GITHUB_URL)
+        proposal = self.detect()
+        self.assertEqual((proposal["tracker"], proposal["landing"]), ("github", "pull_request"))
+
+    def test_detect_proposes_local_and_merge_elsewhere_without_asking_gh(self):
+        for setup in (lambda: self._git("remote", "set-url", "origin", OVERLEAF_URL),
+                      lambda: self._git("remote", "remove", "origin")):
+            setup()
+            self._git("checkout", "-q", "-B", "wip")
+            proposal = self.detect()
+            self.assertEqual((proposal["tracker"], proposal["landing"]), ("local", "merge"))
+            self.assertEqual(proposal["base_branch"], "wip")
+            self.no_gh_call()
+
+
+class NoGh(PilotTestCase):
+    """A machine that has never heard of GitHub must still get past base_sync.sh.
+
+    Corrects a review finding (fix-1, found after the fact): with the defaults
+    and no `gh` installed, the base-branch lookup was a traceback.
+    """
+
+    def run_without_gh(self, *args):
+        env = {"PATH": self.path_without_gh()}
+        return self.run_script("pilot_config.py", *args, env=env)
+
+    def test_the_base_branch_is_the_current_one(self):
+        self._git("checkout", "-q", "-b", "wip")
+        out = self.run_without_gh("base-branch")
+        self.assertEqual(out.stdout.strip(), "wip")
+        self.assertNotIn("Traceback", out.stderr)
+
+    def test_the_default_branch_is_empty(self):
+        out = self.run_without_gh("default-branch")
+        self.assertEqual((out.returncode, out.stdout), (0, "\n"))
+        self.assertNotIn("Traceback", out.stderr)
+
+
+class Exclude(PilotTestCase):
+    def exclude(self, *paths, check=True):
+        return self.run_script("pilot_config.py", "exclude", *paths, check=check)
+
+    def tracking(self, path):
+        return self.run_script("pilot_config.py", "tracking", path).stdout.strip()
+
+    def excludes(self):
+        path = self.repo / ".git" / "info" / "exclude"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_a_file_and_a_directory_are_excluded_with_anchored_patterns(self):
+        (self.repo / ".issue-pilot.json").write_text("{}")
+        (self.repo / "issues").mkdir()
+        (self.repo / "issues" / "0001-x.md").write_text("# x\n")
+        out = self.exclude(".issue-pilot.json", "issues/")
+        self.assertEqual(out.stdout.splitlines(),
+                         ["excluded /.issue-pilot.json", "excluded /issues/"])
+        self.assertIn("/.issue-pilot.json", self.excludes())
+        self.assertIn("/issues/", self.excludes())
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual((self.tracking(".issue-pilot.json"), self.tracking("issues/"), self.tracking("issues")),
+                         ("ignored", "ignored", "ignored"))
+
+    def test_a_second_exclude_adds_nothing(self):
+        self.exclude(".issue-pilot.json", "issues/")
+        before = self.excludes()
+        out = self.exclude(".issue-pilot.json", "issues/")
+        self.assertEqual(out.stdout.splitlines(),
+                         ["already excluded /.issue-pilot.json", "already excluded /issues/"])
+        self.assertEqual(self.excludes(), before)
+
+    def test_an_existing_directory_gets_a_directory_pattern_without_a_slash_given(self):
+        (self.repo / "issues").mkdir()
+        self.assertEqual(self.exclude("issues").stdout.strip(), "excluded /issues/")
+
+    def test_the_info_directory_is_created_when_missing_and_existing_lines_are_kept(self):
+        info = self.repo / ".git" / "info"
+        for child in info.iterdir():
+            child.unlink()
+        info.rmdir()
+        self.exclude("issues/")
+        self.assertEqual(self.excludes(), ["/issues/"])
+        self.exclude("notes.txt")
+        self.assertEqual(self.excludes(), ["/issues/", "/notes.txt"])
+
+    def test_a_pattern_is_added_after_a_last_line_with_no_newline(self):
+        info = self.repo / ".git" / "info"
+        info.mkdir(exist_ok=True)
+        (info / "exclude").write_text("*.log")
+        self.exclude("issues/")
+        self.assertEqual(self.excludes(), ["*.log", "/issues/"])
+
+    def test_a_path_git_tracks_is_refused_and_nothing_is_written(self):
+        (self.repo / "issues").mkdir()
+        (self.repo / "issues" / "0001-x.md").write_text("# x\n")
+        self._git("add", "issues")
+        self._git("commit", "-qm", "issue")
+        before = self.excludes()
+        out = self.exclude(".issue-pilot.json", "issues/", check=False)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("issues", out.stderr)
+        self.assertIn("git rm -r --cached issues", out.stderr)
+        # Not even the path that was fine: all or nothing.
+        self.assertEqual(self.excludes(), before)
+        self.assertEqual(self.tracking("issues/"), "versioned")
+
+    def test_a_path_outside_the_repository_is_refused(self):
+        out = self.exclude("../elsewhere", check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertEqual(self.excludes(), self.excludes())
+
+    def test_tracking_says_versioned_for_anything_not_ignored(self):
+        self.assertEqual(self.tracking("README.md"), "versioned")
+        self.assertEqual(self.tracking("issues/"), "versioned")
+
+    def test_everything_ignored_works_end_to_end_with_a_clean_status(self):
+        # The configuration is written but not committed, and kept out of git:
+        # the sync, the tracker and the stamp must all work with nothing to show.
+        self.exclude(".issue-pilot.json", "issues/")
+        (self.repo / ".issue-pilot.json").write_text(json.dumps(
+            {"test_command": "true", "base_branch": "main", "tracker": "local", "landing": "merge"}))
+        self._git("push", "-q", "origin", "main")
+        self.assertEqual(self.run_script("pilot_config.py", "check").returncode, 0)
+        sync = subprocess.run(["bash", str(SCRIPTS / "base_sync.sh")], cwd=self.repo,
+                              capture_output=True, text=True, env=self.env)
+        self.assertEqual(sync.returncode, 0, sync.stderr)
+        body = self.repo.parent / "body.md"
+        body.write_text("Body.\n")
+        created = self.run_script("issues_tracker.py", "create", "--title", "First",
+                                  "--body-file", str(body)).stdout.splitlines()
+        self.assertEqual(created, ["1", "issues/0001-first.md"])
+        stamp = self.run_script("issue_base.py", "stamp").stdout.strip()
+        self.assertEqual(stamp, "_Planned against `main` at `%s`._" % self.git("rev-parse", "main"))
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        committed = self.run_script("issues_tracker.py", "commit", "-m", "x").stdout.strip()
+        self.assertEqual(committed, "nothing to commit: issues are not kept in git here")
+        # The file survives a checkout to another branch and back.
+        self._git("checkout", "-q", "-b", "elsewhere")
+        self._git("checkout", "-q", "main")
+        self.assertTrue((self.repo / "issues" / "0001-first.md").exists())
 
 
 class NotesFile(PilotTestCase):

@@ -79,6 +79,23 @@ class DependencyRule(PilotTestCase):
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("42", out.stderr)
 
+    def test_local_issues_are_planned_from_their_files(self):
+        # The planner reads through issues_tracker, so the same rule applies to
+        # markdown files in the repository: no GitHub involved, no fake issues.
+        self.write_config({"test_command": "true", "tracker": "local"})
+        issues = self.repo / "issues"
+        issues.mkdir()
+        (issues / "0001-first.md").write_text("# First\n\nIndependent.\n")
+        (issues / "0002-second.md").write_text("# Second\n\nBuilds on #1.\n")
+        (issues / "0003-third.md").write_text("# Third\n\nAlone.\n")
+        self.write_issues({})
+        out = self.run_script("issues_plan.py", "1", "2", "3")
+        plan = {p["issue"]: p for p in json.loads(out.stdout)["plan"]}
+        self.assertEqual(plan[2]["depends_on"], [1])
+        self.assertFalse(plan[2]["clear_before"])
+        self.assertTrue(plan[3]["clear_before"])
+        self.assertEqual(plan[1]["title"], "First")
+
 
 if __name__ == "__main__":
     unittest.main()

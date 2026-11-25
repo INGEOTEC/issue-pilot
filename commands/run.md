@@ -36,6 +36,9 @@ origin has for it. The run will start from exactly that commit, so that is
 what the issues have to be read against — not the working tree as you found
 it, which is usually on a feature branch or a base branch that fell behind.
 
+In a repository with no remote there is nothing to fetch: the local base branch
+is the reference, and is taken as it is.
+
 It refuses three things, and each one is a **stop and report**, in its own
 words, with nothing stashed or discarded by you:
 
@@ -52,7 +55,7 @@ words, with nothing stashed or discarded by you:
 All of them, start to finish, in the order given:
 
 ```bash
-gh issue view <n> --comments
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" view <n>
 ```
 
 Then find out how much the code has moved since each issue was written:
@@ -185,9 +188,11 @@ yourself. If it says there is no detached driver, say so and stop.
 
 ## What the driver does, so you can read its log
 
-- **Prerequisites and credentials.** It checks `git`, `gh`, `claude` and
-  `python3`, that `gh` is authenticated, and resolves a token for the `claude`
-  subprocesses it launches: `CLAUDE_CODE_OAUTH_TOKEN`, else that same export in
+- **Prerequisites and credentials.** It checks `git`, `claude` and
+  `python3`; `gh` too, and that it is authenticated, but only when the
+  project uses GitHub (`pilot_config.py uses-github`: the tracker is `github`
+  or the landing is `pull_request`). It resolves a
+  token for the `claude` subprocesses it launches: `CLAUDE_CODE_OAUTH_TOKEN`, else that same export in
   your shell rc, else `~/.claude/.credentials.json`, else (on macOS) a
   `Claude Code-credentials` item in the Keychain, whose existence is checked
   without ever reading the secret. With none of those it exits 78 before

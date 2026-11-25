@@ -58,7 +58,7 @@ git show <branch>:<path/to/file>          # the code the finding touches
 ```
 
 `<base_commit>` and `<branch>` are in the state. Read the texts of the run's
-issues too (`gh issue view <n> --comments`, for each `issue` in the plan that is
+issues too (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py" view <n>`, for each `issue` in the plan that is
 a number, not a `fix-<k>`) — the finding is usually about work one of them
 described, and their text is context for what "correct" means here.
 

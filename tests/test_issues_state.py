@@ -160,6 +160,59 @@ class RunState(PilotTestCase):
         self.assertIn("will NOT close the issues", out)
         self.assertIn("/issue-pilot:close", out)
 
+    def test_pr_records_the_kind_and_head_of_a_landing(self):
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        out = self.run_script("issues_state.py", "pr", "merged into main at abc1234",
+                              "--kind", "merge", "--base", "main", "--head", "abc1234def",
+                              "--closes-automatically")
+        self.assertEqual(out.stdout.strip(), "landing recorded: merged into main at abc1234")
+        record = self.state()["pull_request"]
+        self.assertEqual((record["kind"], record["head"], record["base"]),
+                         ("merge", "abc1234def", "main"))
+
+    def test_a_pull_request_is_recorded_with_its_kind_too(self):
+        self.init(1)
+        out = self.run_script("issues_state.py", "pr", "https://gh/pr/7", "--number", "7", "--base", "main")
+        self.assertEqual(out.stdout.strip(), "pull request https://gh/pr/7 recorded")
+        self.assertEqual(self.state()["pull_request"]["kind"], "pull_request")
+
+    def test_status_shows_a_landed_line_for_each_other_kind(self):
+        for kind, automatic in (("merge", True), ("push", False), ("branch", False)):
+            with self.subTest(kind=kind):
+                self.init(1)
+                self.run_script("issues_state.py", "done", "1")
+                args = ["pr", "described %s" % kind, "--kind", kind, "--base", "main"]
+                self.run_script("issues_state.py", *args, *(["--closes-automatically"] if automatic else []))
+                out = self.run_script("issues_state.py", "status").stdout
+                self.assertIn("landed     : described %s -> main" % kind, out)
+                self.assertNotIn("pull req   :", out)
+                self.assertEqual("the issues stay open until the branch is merged" in out, not automatic)
+                self.assertEqual("/issue-pilot:close" in out, not automatic)
+
+    def test_a_record_without_a_kind_is_a_pull_request(self):
+        # State files written before landings existed have no `kind`.
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        self.run_script("issues_state.py", "pr", "https://gh/pr/7", "--number", "7", "--base", "main",
+                        "--closes-automatically")
+        path = next(self.home.glob("state/issues-run-*.json"))
+        state = json.loads(path.read_text())
+        del state["pull_request"]["kind"], state["pull_request"]["head"]
+        path.write_text(json.dumps(state))
+        out = self.run_script("issues_state.py", "status").stdout
+        self.assertIn("pull req   : https://gh/pr/7 -> main", out)
+        self.assertNotIn("landed", out)
+
+    def test_the_last_line_names_the_landing(self):
+        self.init(1)
+        self.run_script("issues_state.py", "done", "1")
+        self.assertIn("every issue is done -- open the pull request with /issue-pilot:pr",
+                      self.run_script("issues_state.py", "status").stdout)
+        self.write_config({"test_command": "true", "base_branch": "main", "landing": "merge"})
+        self.assertIn("every issue is done -- finish the run with /issue-pilot:pr",
+                      self.run_script("issues_state.py", "status").stdout)
+
     def test_status_points_at_the_pull_request_when_everything_is_done(self):
         self.init(1)
         self.run_script("issues_state.py", "done", "1")
@@ -899,6 +952,123 @@ class WatchInTheCommands(unittest.TestCase):
 
     def test_status_md_never_waits(self):
         self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))
+
+
+class IssuesGoThroughTheTracker(unittest.TestCase):
+    """The commands and the per-issue prompt name one tool for issues, not `gh`."""
+
+    FILES = ("commands/plan.md", "commands/run.md", "commands/fix.md",
+             "scripts/prompts/one.md", "scripts/issues_run.sh")
+
+    def text(self, name):
+        return (SCRIPTS.parent / name).read_text()
+
+    def test_only_the_update_edit_is_left_calling_gh_issue(self):
+        lines = [(name, line.strip()) for name in self.FILES
+                 for line in self.text(name).splitlines() if "gh issue" in line]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(lines[0][0], "commands/plan.md")
+        self.assertIn("gh issue edit", lines[0][1])
+
+    def test_the_prompt_refers_to_the_tracker_the_way_the_driver_substitutes(self):
+        text = self.text("scripts/prompts/one.md")
+        self.assertTrue(text.startswith("issue-pilot item: {{ITEM}}"))
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text)
+        self.assertNotIn("$ARGUMENTS", text)
+        self.assertIn('python3 "{{ROOT}}/scripts/issues_tracker.py"', text)
+
+    def test_the_commands_refer_to_it_through_the_plugin_root(self):
+        for name in ("commands/plan.md", "commands/run.md", "commands/fix.md"):
+            self.assertIn('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py"',
+                          self.text(name), name)
+
+    def test_finishing_an_issue_is_spelled_out_in_order(self):
+        text = self.text("scripts/prompts/one.md")
+        order = [text.index(needle) for needle in (
+            "(issue #<n>)", "git rev-parse HEAD", "issues_tracker.py\" comment <n> --body-file",
+            "issues_tracker.py\" commit -m 'Record the outcome of issue #<n>'",
+            "issues_state.py\" done <n> --commit <hash>")]
+        self.assertEqual(order, sorted(order))
+        self.assertNotIn('--commit "$(git rev-parse HEAD)"', text)
+
+    def test_pr_md_hands_other_landings_to_run_land(self):
+        text = self.text("commands/pr.md")
+        self.assertIn('bash "${CLAUDE_PLUGIN_ROOT}/scripts/run_land.sh"', text)
+        self.assertIn("run_land.sh\" --close-issues-only", text)
+        self.assertIn("get landing", text)
+        self.assertIn("Finish an issue-pilot run: open its pull request, or land it the way "
+                      "the project is configured", text)
+        self.assertIn("(local tracker, closed on this branch)", text)
+
+    def test_init_md_step_5_proves_validity_after_everything_is_written(self):
+        # Corrects a review finding (fix-1): "If that reports a problem" had come
+        # to follow the exclude command instead of the check.
+        text = self.text("commands/init.md")
+        step = text.split("## 5. Write it", 1)[1].split("## 6.", 1)[0]
+        order = [step.index(n) for n in (
+            "base_sync.sh", "exclude .issue-pilot.json", "Write `.issue-pilot.json`",
+            "mkdir -p <issues_dir>", "exclude <issues_dir>/", "pilot_config.py\" check",
+            "If that reports a problem")]
+        self.assertEqual(order, sorted(order))
+
+    def test_close_md_names_merge_in_step_2(self):
+        text = self.text("commands/close.md")
+        self.assertIn("`kind` is `merge`, `push` or `branch`", text)
+        self.assertIn("it is reached only when closing the issues failed at landing time", " ".join(text.split()))
+
+    def test_close_md_works_for_every_landing_and_tracker(self):
+        text = self.text("commands/close.md")
+        self.assertNotIn("gh issue", text)
+        self.assertIn("issues_tracker.py\" close <n>", text)
+        self.assertIn("issues_tracker.py\" commit --push", text)
+        self.assertIn("git merge-base --is-ancestor <head>", text)
+        self.assertIn("--force", text)
+        self.assertIn("Close the issues of a run once its work is merged, when nothing "
+                      "closed them automatically", text)
+
+    def test_init_md_asks_everything_in_two_calls(self):
+        text = " ".join(self.text("commands/init.md").split())
+        for needle in ("pilot_config.py\" hosting", "pilot_config.py\" exclude .issue-pilot.json",
+                       "pilot_config.py\" tracking", "config_land.sh\" --direct",
+                       "two calls", "`tracker`", "`landing`", "`.issue-pilot.json`",
+                       "The issues directory", "kept out", "versioned",
+                       "(GitHub or not)"):
+            self.assertIn(needle, text)
+        # The pull-request flow is still there for GitHub.
+        self.assertIn('config_land.sh" --merge', self.text("commands/init.md"))
+
+    def test_the_readme_documents_every_setting_and_the_feature(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import pilot_config
+        readme = (SCRIPTS.parent / "README.md").read_text()
+        rows = {line.split("|")[1].strip().strip("`") for line in readme.splitlines()
+                if line.startswith("| `") and line.count("|") >= 4}
+        for key in pilot_config.DEFAULTS:
+            self.assertIn(key, rows, "README settings table lacks %s" % key)
+        self.assertIn("## Without GitHub", readme)
+        for needle in ("Overleaf", "landing", "issue-pilot:comment", ".git/info/exclude",
+                       "Not supported"):
+            self.assertIn(needle, readme)
+
+    def test_the_example_configuration_lists_every_setting(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import pilot_config
+        example = json.loads((SCRIPTS.parent / ".issue-pilot.example.json").read_text())
+        self.assertEqual(set(example), set(pilot_config.DEFAULTS))
+
+    def test_the_release_is_one_section_with_an_empty_unreleased_above_it(self):
+        changelog = (SCRIPTS.parent / "CHANGELOG.md").read_text()
+        version = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
+        self.assertEqual(version, "0.7.0")
+        self.assertEqual(changelog.count("## [0.7.0] - "), 1)
+        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.0]", 1)[0]
+        self.assertEqual(unreleased.strip(), "")
+        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[1-9])\]")
+
+    def test_plan_commits_and_pushes_the_new_issue(self):
+        text = self.text("commands/plan.md")
+        self.assertIn("commit --push", text)
+        self.assertIn("Add issue <n>: <title>", text)
 
 
 if __name__ == "__main__":

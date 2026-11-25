@@ -22,7 +22,9 @@ Precedence, highest first:
 `base_branch` has one extra fallback the others do not: when nothing sets it,
 `resolve_base_branch()` asks GitHub for the repository's default branch.  That
 call is deliberately not made here -- reading configuration must not need a
-network.
+network.  It is also not made at all when the project does not use GitHub
+(`uses_github()`): there is nobody to ask, and `check` then insists on the
+setting instead.
 
 Usage from the shell, which is how the driver and the commands read it:
 
@@ -43,7 +45,7 @@ CONFIG_FILENAME = ".issue-pilot.json"
 # and the README are both generated from this table, so it is the only place a
 # new setting has to be added.
 DEFAULTS = {
-    "base_branch": (None, "Branch a run starts from. Default: the repository's default branch on GitHub."),
+    "base_branch": (None, "Branch a run starts from. Default: the repository's default branch on GitHub, when it is on GitHub."),
     "branch_prefix": ("issues", "Prefix of the run branch; the issue numbers are appended (issues-165-166)."),
     "test_command": (None, "Shell command that runs the test suite. Default: let the session infer it from the project."),
     "model": ("sonnet", "Model every autonomous session runs on, independent of your interactive default."),
@@ -51,8 +53,32 @@ DEFAULTS = {
     "max_attempts": (3, "Attempts on one issue before the run stops."),
     "pr_draft": (False, "Open the final pull request as a draft."),
     "issue_labels": ([], "Labels applied to issues opened by /issue-pilot:plan."),
+    "tracker": ("github", "Where issues live: github, or local (markdown files under issues_dir)."),
+    "issues_dir": ("issues", "Directory, relative to the repository root, that holds the issues when tracker is local."),
+    "landing": ("pull_request", "How a finished run reaches the base branch: pull_request (GitHub), merge, push or branch."),
     "watch": (True, "After /issue-pilot:run and /issue-pilot:fix detach the driver, wait in the background and report when it stops."),
 }
+
+TRACKERS = ("github", "local")
+LANDINGS = ("pull_request", "merge", "push", "branch")
+
+
+def issues_dir_problem(value):
+    """Why `value` cannot be `issues_dir`, or None.
+
+    The directory is created, written and `git add`ed by the tracker, so it has
+    to stay inside the repository: an absolute path or a `..` would let a typo
+    write (and commit) somewhere else.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "must be a non-empty path relative to the repository root"
+    path = pathlib.PurePosixPath(value.replace("\\", "/"))
+    if path.is_absolute() or pathlib.PureWindowsPath(value).is_absolute():
+        return "must be relative to the repository root, not absolute (%s)" % value
+    if ".." in path.parts:
+        return "must not contain a `..` component (%s)" % value
+    return None
+
 
 # Where run state and logs live.  Not part of the per-repo config: it is a
 # property of the machine, so only the environment moves it.
@@ -194,6 +220,59 @@ def load(root=None) -> dict:
     return cfg
 
 
+def uses_github(cfg=None) -> bool:
+    """Whether `gh` is needed at all: the issues or the landing are GitHub's.
+
+    Derived rather than a third setting because there is nothing else `gh` is
+    used for.  With the defaults it is true, so existing projects are unaffected.
+    """
+    cfg = cfg if cfg is not None else load()
+    return cfg["tracker"] == "github" or cfg["landing"] == "pull_request"
+
+
+def has_origin(root=None) -> bool:
+    """Whether this repository has a remote called `origin`.
+
+    Detected, not configured: the repository already knows.  Only `origin` is
+    supported, here and everywhere else.
+    """
+    out = subprocess.run(["git", "remote", "get-url", "origin"],
+                         capture_output=True, text=True, cwd=root)
+    return out.returncode == 0
+
+
+def hosting(root=None) -> dict:
+    """Where this repository's remote is, judged offline from the URL of `origin`.
+
+    `origin` is whether there is one; `github` whether its URL names github.com.
+    No network and no `gh`: it only decides which option /issue-pilot:init
+    offers first, and a wrong guess costs one different answer, not a failure.
+    """
+    out = subprocess.run(["git", "remote", "get-url", "origin"],
+                         capture_output=True, text=True, cwd=root)
+    origin = out.returncode == 0
+    return {"origin": origin, "github": origin and "github.com" in out.stdout}
+
+
+def _gh_default_branch(repo=None) -> str:
+    """The default branch GitHub reports, or "" when gh cannot say.
+
+    "Cannot say" includes gh not being installed: a machine that has never
+    heard of GitHub must still get past base_sync.sh on its way to
+    /issue-pilot:init, which is where it is told not to use GitHub.
+    (Review fix-1: before this, a missing `gh` was a traceback.)
+    """
+    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
+           "--jq", ".defaultBranchRef.name"]
+    if repo:
+        cmd[3:3] = [repo]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError:
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
 def default_branch(repo=None) -> str:
     """The repository's default branch on GitHub.
 
@@ -201,30 +280,25 @@ def default_branch(repo=None) -> str:
     request references when that pull request merges into *this* branch.  A
     project whose runs target `develop` therefore has to close them itself.
     """
-    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
-           "--jq", ".defaultBranchRef.name"]
-    if repo:
-        cmd[3:3] = [repo]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    return out.stdout.strip() if out.returncode == 0 else ""
+    if not uses_github():
+        return ""
+    return _gh_default_branch(repo)
 
 
 def resolve_base_branch(cfg=None, repo=None) -> str:
     """Configured base branch, or the repository's default branch on GitHub.
 
-    Falls back to whatever git says HEAD is when `gh` cannot answer, so a
-    network outage degrades into "start from where you are" instead of failing.
+    Falls back to whatever git says HEAD is when `gh` cannot answer -- or is not
+    to be asked, because the project does not use GitHub -- so a network outage
+    degrades into "start from where you are" instead of failing.
     """
     cfg = cfg if cfg is not None else load()
     if cfg.get("base_branch"):
         return cfg["base_branch"]
-    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
-           "--jq", ".defaultBranchRef.name"]
-    if repo:
-        cmd[3:3] = [repo]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode == 0 and out.stdout.strip():
-        return out.stdout.strip()
+    if uses_github(cfg):
+        found = _gh_default_branch(repo)
+        if found:
+            return found
     head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                           capture_output=True, text=True)
     return head.stdout.strip() or "main"
@@ -265,9 +339,87 @@ def detect(root=None) -> dict:
     """A proposed configuration for this repository, for a human to confirm."""
     root = root or repo_root()
     cfg = {key: default for key, (default, _) in DEFAULTS.items()}
+    # Before the base branch is resolved: a repository that is not on GitHub is
+    # never asked of `gh`, and the proposal is then the branch it is on.
+    if not hosting(root)["github"]:
+        cfg["tracker"], cfg["landing"] = "local", "merge"
     cfg["base_branch"] = resolve_base_branch(cfg)
     cfg["test_command"] = detect_test_command(root)
     return cfg
+
+
+def _info_exclude(root):
+    """The clone-local ignore file, wherever git keeps it (worktrees included)."""
+    out = subprocess.run(["git", "rev-parse", "--git-path", "info/exclude"],
+                         capture_output=True, text=True, cwd=root)
+    if out.returncode != 0:
+        sys.exit("not inside a git repository")
+    return pathlib.Path(root) / out.stdout.strip()
+
+
+def _repo_path(root, path):
+    """`(name, is_directory)` for a path given relative to the repository root."""
+    name = path.strip("/")
+    problem = issues_dir_problem(name) if name else "is empty"
+    if problem:
+        sys.exit("cannot exclude %r: it %s" % (path, problem.replace("must be", "has to be")))
+    return name, path.endswith("/") or (pathlib.Path(root) / name).is_dir()
+
+
+def exclude(paths, root=None):
+    """Keep `paths` out of git in this clone only, through `.git/info/exclude`.
+
+    Not `.gitignore`: the point of ignoring is to leave the repository untouched,
+    and `.gitignore` is itself a versioned file.  Patterns are anchored
+    (`/issues/`), so they cannot catch a same-named path elsewhere.  Returns the
+    lines to print; exits 2, changing nothing, when git already tracks something
+    there -- an ignore pattern does not apply to a tracked file, so it would
+    promise something it cannot deliver.
+    """
+    root = root or repo_root()
+    wanted = []
+    for path in paths:
+        name, is_dir = _repo_path(root, path)
+        tracked = subprocess.run(["git", "ls-files", "--", name], capture_output=True,
+                                 text=True, cwd=root).stdout.strip()
+        if tracked:
+            print("error: git already tracks %s, so ignoring it would do nothing.\n"
+                  "  To turn a versioned path into an ignored one:\n"
+                  "    git rm -r --cached %s    # then commit\n"
+                  "  and run this again." % (name, name), file=sys.stderr)
+            sys.exit(2)
+        wanted.append("/" + name + ("/" if is_dir else ""))
+
+    target = _info_exclude(root)
+    existing = target.read_text().splitlines() if target.exists() else []
+    report, added = [], []
+    for pattern in wanted:
+        if pattern in (line.strip() for line in existing + added):
+            report.append("already excluded " + pattern)
+        else:
+            added.append(pattern)
+            report.append("excluded " + pattern)
+    if added:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = target.read_text() if target.exists() else ""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        target.write_text(text + "".join(p + "\n" for p in added))
+    return report
+
+
+def tracking(path, root=None) -> str:
+    """`ignored` when git ignores `path` here, else `versioned`.
+
+    Asked of git every time rather than remembered: an answer from memory can
+    disagree with the repository, git cannot.  A directory is probed through a
+    file that would live in it, which works before it exists.
+    """
+    root = root or repo_root()
+    name, is_dir = _repo_path(root, path)
+    probe = name + "/.probe" if is_dir else name
+    out = subprocess.run(["git", "check-ignore", "-q", "--", probe], cwd=root)
+    return "ignored" if out.returncode == 0 else "versioned"
 
 
 def validate(root=None):
@@ -291,6 +443,21 @@ def validate(root=None):
         # nothing, and the same typo found mid-run costs the run.
         problems.append("%s: unknown setting(s) %s; known settings are %s"
                         % (path, ", ".join(unknown), ", ".join(sorted(DEFAULTS))))
+    if "tracker" in data and data["tracker"] not in TRACKERS:
+        problems.append("%s: tracker is %r; it must be one of %s"
+                        % (path, data["tracker"], ", ".join(TRACKERS)))
+    if "landing" in data and data["landing"] not in LANDINGS:
+        problems.append("%s: landing is %r; it must be one of %s"
+                        % (path, data["landing"], ", ".join(LANDINGS)))
+    if "issues_dir" in data:
+        problem = issues_dir_problem(data["issues_dir"])
+        if problem:
+            problems.append("%s: issues_dir %s" % (path, problem))
+    effective = {key: data.get(key, default) for key, (default, _) in DEFAULTS.items()}
+    if (not uses_github(effective)
+            and not (isinstance(data.get("base_branch"), str) and data["base_branch"].strip())):
+        problems.append("%s: base_branch is not set, and without GitHub there is nothing "
+                        "to ask for a default" % path)
     if not str(data.get("test_command") or "").strip():
         problems.append(
             "%s: test_command is not set. An unattended session has to know what "
@@ -314,6 +481,13 @@ def main():
     sub.add_parser("path", help="print where run state is kept")
     sub.add_parser("version", help="print the running version and the path it runs from")
 
+    sub.add_parser("uses-github", help="print yes when gh is needed (tracker or landing is GitHub's), else no")
+    sub.add_parser("remote", help="print origin when that remote exists, nothing otherwise")
+    sub.add_parser("hosting", help="print as JSON whether origin exists and whether it is on GitHub")
+    p = sub.add_parser("exclude", help="keep paths out of git in this clone (.git/info/exclude)")
+    p.add_argument("paths", nargs="+")
+    p = sub.add_parser("tracking", help="print ignored or versioned for a path")
+    p.add_argument("path")
     sub.add_parser("default-branch", help="print the repository's default branch on GitHub")
     sub.add_parser("check", help="fail unless this repository is configured")
     sub.add_parser("detect", help="propose a configuration for this repository")
@@ -350,6 +524,17 @@ def main():
         root, version = running_copy()
         print(version or "unknown")
         print(root)
+    elif args.cmd == "uses-github":
+        print("yes" if uses_github() else "no")
+    elif args.cmd == "remote":
+        if has_origin():
+            print("origin")
+    elif args.cmd == "hosting":
+        print(json.dumps(hosting()))
+    elif args.cmd == "exclude":
+        print("\n".join(exclude(args.paths)))
+    elif args.cmd == "tracking":
+        print(tracking(args.path))
     elif args.cmd == "default-branch":
         print(default_branch())
     elif args.cmd == "check":
