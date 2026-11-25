@@ -105,14 +105,23 @@ if [[ $FIX -eq 1 && ( ${#ARGS[@]} -gt 0 || $RESUME -eq 1 || $PLAN_ONLY -eq 1 ) ]
 fi
 
 # --------------------------------------------------------------- prerequisites
-for tool in git gh claude python3; do
+for tool in git claude python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "error: \`$tool\` is not installed or not on PATH." >&2; exit 78; }
 done
-gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; run \`gh auth login\`." >&2; exit 78; }
 
 # The project's configuration is not optional.  A run has nobody to ask what
 # green means, so it is decided once, in writing, before anything starts.
 python3 "$CONFIG" check >/dev/null || exit 78
+
+# `gh` is needed only when the issues live on GitHub; a project that keeps them
+# as files must be able to run on a machine that has never heard of it.  This is
+# after the configuration check because the tracker is read from it.  An empty
+# answer is the default, github.
+TRACKER_KIND="$(cfg tracker)"
+if [[ -z "$TRACKER_KIND" || "$TRACKER_KIND" == github ]]; then
+  command -v gh >/dev/null 2>&1 || { echo "error: \`gh\` is not installed or not on PATH." >&2; exit 78; }
+  gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; run \`gh auth login\`." >&2; exit 78; }
+fi
 
 # The per-issue sessions (first attempts of --resume and --fix included) are
 # started from a prompt file the driver owns, not from a slash command: nobody
@@ -473,7 +482,7 @@ This is the ONLY chance to ask me anything in the whole run: after this session
 nobody will be watching.
 
 1. Read EVERY issue in the list, start to finish, with
-   \`gh issue view <n> --comments\`, in the order given. All of them, not just
+   \`python3 "$SCRIPTS/issues_tracker.py" view <n>\`, in the order given. All of them, not just
    the first one.
 2. Read CLAUDE.md and the code each issue touches, enough to know whether the
    issue is implementable as written.

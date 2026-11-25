@@ -901,5 +901,48 @@ class WatchInTheCommands(unittest.TestCase):
         self.assertNotIn("wait", self.text("status.md").replace("do not wait", ""))
 
 
+class IssuesGoThroughTheTracker(unittest.TestCase):
+    """The commands and the per-issue prompt name one tool for issues, not `gh`."""
+
+    FILES = ("commands/plan.md", "commands/run.md", "commands/fix.md",
+             "scripts/prompts/one.md", "scripts/issues_run.sh")
+
+    def text(self, name):
+        return (SCRIPTS.parent / name).read_text()
+
+    def test_only_the_update_edit_is_left_calling_gh_issue(self):
+        lines = [(name, line.strip()) for name in self.FILES
+                 for line in self.text(name).splitlines() if "gh issue" in line]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(lines[0][0], "commands/plan.md")
+        self.assertIn("gh issue edit", lines[0][1])
+
+    def test_the_prompt_refers_to_the_tracker_the_way_the_driver_substitutes(self):
+        text = self.text("scripts/prompts/one.md")
+        self.assertTrue(text.startswith("issue-pilot item: {{ITEM}}"))
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text)
+        self.assertNotIn("$ARGUMENTS", text)
+        self.assertIn('python3 "{{ROOT}}/scripts/issues_tracker.py"', text)
+
+    def test_the_commands_refer_to_it_through_the_plugin_root(self):
+        for name in ("commands/plan.md", "commands/run.md", "commands/fix.md"):
+            self.assertIn('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/issues_tracker.py"',
+                          self.text(name), name)
+
+    def test_finishing_an_issue_is_spelled_out_in_order(self):
+        text = self.text("scripts/prompts/one.md")
+        order = [text.index(needle) for needle in (
+            "(issue #<n>)", "git rev-parse HEAD", "issues_tracker.py\" comment <n> --body-file",
+            "issues_tracker.py\" commit -m 'Record the outcome of issue #<n>'",
+            "issues_state.py\" done <n> --commit <hash>")]
+        self.assertEqual(order, sorted(order))
+        self.assertNotIn('--commit "$(git rev-parse HEAD)"', text)
+
+    def test_plan_commits_and_pushes_the_new_issue(self):
+        text = self.text("commands/plan.md")
+        self.assertIn("commit --push", text)
+        self.assertIn("Add issue <n>: <title>", text)
+
+
 if __name__ == "__main__":
     unittest.main()

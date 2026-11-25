@@ -14,8 +14,23 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   create, comment, close, and committing the issues) for the configured tracker.
   The `local` tracker keeps one markdown file per issue, comments included, in
   `issues_dir`. The planner (`issues_plan.py`) and `issue_base.py drift` read
-  issues through it. The commands and prompts do not use the new settings yet:
-  they still call `gh`, and nothing changes with the defaults.
+  issues through it. Nothing changes with the defaults.
+
+### Changed
+
+- `/issue-pilot:plan`, `/issue-pilot:run`, `/issue-pilot:fix`, the per-issue
+  prompt and the driver's interview reach issues through
+  `scripts/issues_tracker.py` instead of `gh issue ...`. With `tracker: local`,
+  planning, running and review fixes work on markdown issues. `plan` commits
+  and pushes a new local issue file to the base branch (`issues_tracker.py
+  commit --push`), and each item records its outcome with a comment followed by
+  `issues_tracker.py commit`. Finishing an issue now notes the work's commit
+  hash before commenting, so the hash recorded for the item is the work's, not
+  the comment's. With the defaults nothing changes beyond the spelling of the
+  commands.
+- The driver requires `gh` on `PATH`, and authenticated, only when the tracker
+  is `github`; the configuration is checked before that, since the tracker is
+  read from it.
 
 ## [0.6.0] - 2026-11-18
 

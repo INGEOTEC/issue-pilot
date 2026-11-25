@@ -68,7 +68,8 @@ cd issue-pilot
 ```
 
 **Requirements:** `git`, `python3` (3.10+, standard library only), the
-[GitHub CLI](https://cli.github.com) authenticated (`gh auth login`), `curl`,
+the [GitHub CLI](https://cli.github.com) authenticated (`gh auth login`) unless
+the project's `tracker` is `local`, `curl`,
 and a `claude` that can start subprocesses of its own — run `claude setup-token`
 once, or export `CLAUDE_CODE_OAUTH_TOKEN`. Being logged in inside a session is
 not enough: that token is not passed to subprocesses, and the driver launches
