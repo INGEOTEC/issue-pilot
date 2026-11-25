@@ -22,7 +22,9 @@ Precedence, highest first:
 `base_branch` has one extra fallback the others do not: when nothing sets it,
 `resolve_base_branch()` asks GitHub for the repository's default branch.  That
 call is deliberately not made here -- reading configuration must not need a
-network.
+network.  It is also not made at all when the project does not use GitHub
+(`uses_github()`): there is nobody to ask, and `check` then insists on the
+setting instead.
 
 Usage from the shell, which is how the driver and the commands read it:
 
@@ -43,7 +45,7 @@ CONFIG_FILENAME = ".issue-pilot.json"
 # and the README are both generated from this table, so it is the only place a
 # new setting has to be added.
 DEFAULTS = {
-    "base_branch": (None, "Branch a run starts from. Default: the repository's default branch on GitHub."),
+    "base_branch": (None, "Branch a run starts from. Default: the repository's default branch on GitHub, when it is on GitHub."),
     "branch_prefix": ("issues", "Prefix of the run branch; the issue numbers are appended (issues-165-166)."),
     "test_command": (None, "Shell command that runs the test suite. Default: let the session infer it from the project."),
     "model": ("sonnet", "Model every autonomous session runs on, independent of your interactive default."),
@@ -218,6 +220,27 @@ def load(root=None) -> dict:
     return cfg
 
 
+def uses_github(cfg=None) -> bool:
+    """Whether `gh` is needed at all: the issues or the landing are GitHub's.
+
+    Derived rather than a third setting because there is nothing else `gh` is
+    used for.  With the defaults it is true, so existing projects are unaffected.
+    """
+    cfg = cfg if cfg is not None else load()
+    return cfg["tracker"] == "github" or cfg["landing"] == "pull_request"
+
+
+def has_origin(root=None) -> bool:
+    """Whether this repository has a remote called `origin`.
+
+    Detected, not configured: the repository already knows.  Only `origin` is
+    supported, here and everywhere else.
+    """
+    out = subprocess.run(["git", "remote", "get-url", "origin"],
+                         capture_output=True, text=True, cwd=root)
+    return out.returncode == 0
+
+
 def default_branch(repo=None) -> str:
     """The repository's default branch on GitHub.
 
@@ -225,6 +248,8 @@ def default_branch(repo=None) -> str:
     request references when that pull request merges into *this* branch.  A
     project whose runs target `develop` therefore has to close them itself.
     """
+    if not uses_github():
+        return ""
     cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
            "--jq", ".defaultBranchRef.name"]
     if repo:
@@ -236,19 +261,21 @@ def default_branch(repo=None) -> str:
 def resolve_base_branch(cfg=None, repo=None) -> str:
     """Configured base branch, or the repository's default branch on GitHub.
 
-    Falls back to whatever git says HEAD is when `gh` cannot answer, so a
-    network outage degrades into "start from where you are" instead of failing.
+    Falls back to whatever git says HEAD is when `gh` cannot answer -- or is not
+    to be asked, because the project does not use GitHub -- so a network outage
+    degrades into "start from where you are" instead of failing.
     """
     cfg = cfg if cfg is not None else load()
     if cfg.get("base_branch"):
         return cfg["base_branch"]
-    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
-           "--jq", ".defaultBranchRef.name"]
-    if repo:
-        cmd[3:3] = [repo]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode == 0 and out.stdout.strip():
-        return out.stdout.strip()
+    if uses_github(cfg):
+        cmd = ["gh", "repo", "view", "--json", "defaultBranchRef",
+               "--jq", ".defaultBranchRef.name"]
+        if repo:
+            cmd[3:3] = [repo]
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
     head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                           capture_output=True, text=True)
     return head.stdout.strip() or "main"
@@ -325,6 +352,11 @@ def validate(root=None):
         problem = issues_dir_problem(data["issues_dir"])
         if problem:
             problems.append("%s: issues_dir %s" % (path, problem))
+    effective = {key: data.get(key, default) for key, (default, _) in DEFAULTS.items()}
+    if (not uses_github(effective)
+            and not (isinstance(data.get("base_branch"), str) and data["base_branch"].strip())):
+        problems.append("%s: base_branch is not set, and without GitHub there is nothing "
+                        "to ask for a default" % path)
     if not str(data.get("test_command") or "").strip():
         problems.append(
             "%s: test_command is not set. An unattended session has to know what "
@@ -348,6 +380,8 @@ def main():
     sub.add_parser("path", help="print where run state is kept")
     sub.add_parser("version", help="print the running version and the path it runs from")
 
+    sub.add_parser("uses-github", help="print yes when gh is needed (tracker or landing is GitHub's), else no")
+    sub.add_parser("remote", help="print origin when that remote exists, nothing otherwise")
     sub.add_parser("default-branch", help="print the repository's default branch on GitHub")
     sub.add_parser("check", help="fail unless this repository is configured")
     sub.add_parser("detect", help="propose a configuration for this repository")
@@ -384,6 +418,11 @@ def main():
         root, version = running_copy()
         print(version or "unknown")
         print(root)
+    elif args.cmd == "uses-github":
+        print("yes" if uses_github() else "no")
+    elif args.cmd == "remote":
+        if has_origin():
+            print("origin")
     elif args.cmd == "default-branch":
         print(default_branch())
     elif args.cmd == "check":

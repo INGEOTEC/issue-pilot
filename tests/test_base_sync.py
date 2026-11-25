@@ -101,5 +101,48 @@ class BaseSync(PilotTestCase):
         self.assertIn("could not fetch", out.stderr)
 
 
+class NoRemote(PilotTestCase):
+    """With no remote there is nothing to fetch: the local base branch is the reference."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_config({"test_command": "true"})
+        self._git("remote", "remove", "origin")
+
+    def sync(self):
+        return subprocess.run(["bash", str(HELPER)], cwd=self.repo,
+                              capture_output=True, text=True, env=self.env)
+
+    def test_checks_the_base_out_and_prints_its_commit(self):
+        self._git("checkout", "-q", "-b", "feat/elsewhere")
+        out = self.sync()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertEqual(out.stdout.strip(), self.git("rev-parse", "main"))
+        self.assertIn("(no remote: the local branch is the reference)", out.stderr)
+        self.assertIn(self.git("rev-parse", "--short", "HEAD"), out.stderr)
+
+    def test_local_commits_are_not_ahead_of_anything(self):
+        (self.repo / "more.txt").write_text("x\n")
+        self._git("add", "more.txt")
+        self._git("commit", "-qm", "more")
+        out = self.sync()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), self.git("rev-parse", "main"))
+
+    def test_a_dirty_tree_is_still_refused(self):
+        (self.repo / "scratch.txt").write_text("not committed\n")
+        out = self.sync()
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("working tree is not clean", out.stderr)
+
+    def test_a_base_branch_that_does_not_exist_is_an_error(self):
+        self.write_config({"test_command": "true", "base_branch": "develop"})
+        out = self.sync()
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("there is no branch develop here and no remote to get it from; "
+                      "set base_branch in .issue-pilot.json to a branch that exists.", out.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

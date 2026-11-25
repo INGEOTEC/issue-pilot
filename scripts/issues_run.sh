@@ -18,7 +18,8 @@
 # The branch is derived from the issue list (`issues-165-166`) and created by
 # this script, right before the first issue is started, off the tip of the base
 # branch AS IT IS ON ORIGIN: the base branch is checked out, fetched and
-# fast-forwarded first, every time (base_sync.sh).  Whatever was checked out
+# fast-forwarded first, every time (base_sync.sh).  With no remote there is
+# nothing to fetch and the local base branch is the reference.  Whatever was checked out
 # before does not come into it: the run has to start from what everybody else
 # has.  A local base branch with commits origin does not have stops the run
 # rather than being reset -- those are somebody's unpushed work.  --from-head is
@@ -113,12 +114,13 @@ done
 # green means, so it is decided once, in writing, before anything starts.
 python3 "$CONFIG" check >/dev/null || exit 78
 
-# `gh` is needed only when the issues live on GitHub; a project that keeps them
-# as files must be able to run on a machine that has never heard of it.  This is
-# after the configuration check because the tracker is read from it.  An empty
-# answer is the default, github.
-TRACKER_KIND="$(cfg tracker)"
-if [[ -z "$TRACKER_KIND" || "$TRACKER_KIND" == github ]]; then
+# `gh` is needed only when the project uses GitHub, for its issues or for the
+# pull request that lands the run (pilot_config.py uses-github); a project that
+# keeps its issues as files and merges locally must be able to run on a machine
+# that has never heard of it.  This is after the configuration check because
+# both settings are read from it.  An empty answer is the default, yes.
+USES_GITHUB="$(python3 "$CONFIG" uses-github 2>/dev/null || true)"
+if [[ "$USES_GITHUB" != no ]]; then
   command -v gh >/dev/null 2>&1 || { echo "error: \`gh\` is not installed or not on PATH." >&2; exit 78; }
   gh auth status >/dev/null 2>&1 || { echo "error: \`gh\` is not authenticated; run \`gh auth login\`." >&2; exit 78; }
 fi
@@ -451,12 +453,21 @@ if [[ $RESUME -eq 0 && $FIX -eq 0 ]]; then
   else
     # base_sync.sh checks the base branch out and fast-forwards it to origin,
     # refusing a dirty tree, an unreachable origin and a local base branch that
-    # is ahead of origin.  It prints the commit the base is now at.
+    # is ahead of origin.  It prints the commit the base is now at.  With no
+    # remote it takes the local base branch as it is, so these messages must not
+    # claim an origin that is not there.
+    if [[ -n "$(python3 "$CONFIG" remote)" ]]; then
+      BASE_WHERE="the tip of origin/$BASE"
+      START_FROM="origin"
+    else
+      BASE_WHERE="the local $BASE"
+      START_FROM="the base branch"
+    fi
     BASE_COMMIT="$(bash "$SCRIPTS/base_sync.sh")" || {
-      echo "       The run starts from origin, not from what is checked out; pass --from-head to start from HEAD on purpose." >&2
+      echo "       The run starts from $START_FROM, not from what is checked out; pass --from-head to start from HEAD on purpose." >&2
       exit 1
     }
-    echo "creating branch $BRANCH off $BASE ($(git rev-parse --short "$BASE_COMMIT"), the tip of origin/$BASE)"
+    echo "creating branch $BRANCH off $BASE ($(git rev-parse --short "$BASE_COMMIT"), $BASE_WHERE)"
     git checkout --quiet --no-track -b "$BRANCH" "$BASE"
   fi
 fi

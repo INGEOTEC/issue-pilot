@@ -697,7 +697,10 @@ class LocalTracker(PilotTestCase):
         issues.mkdir()
         (issues / "0001-first.md").write_text("# First\n\nIndependent.\n")
         (issues / "0002-second.md").write_text("# Second\n\nBuilds on #1.\n")
-        self.write_config({"test_command": "true", "tracker": "local"})
+        # Local issues alone still land through a pull request, which is
+        # GitHub's: `landing: merge` is what makes the project need no `gh`.
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
         self._git("add", "issues")
         self._git("commit", "-qm", "add issues")
         self._git("push", "-q", "origin", "main")
@@ -711,6 +714,23 @@ class LocalTracker(PilotTestCase):
         self.assertEqual(state["status"], {"1": "done", "2": "done"})
         deps = {p["issue"]: p["depends_on"] for p in state["plan"]}
         self.assertEqual(deps, {1: [], 2: [1]})
+
+    def test_a_run_with_no_remote_is_cut_from_the_local_base(self):
+        # Nothing to fetch and nobody to ask: the local base branch is the
+        # reference, and the messages do not claim an origin.
+        self._git("remote", "remove", "origin")
+        out = self.run_driver("--no-interview", "1", "2", check=True)
+        self.assertEqual(self.state()["status"], {"1": "done", "2": "done"})
+        self.assertEqual(self.git("merge-base", "issues-1-2", "main"), self.git("rev-parse", "main"))
+        self.assertIn("the local main", out.stdout)
+        self.assertNotIn("origin", out.stdout)
+
+    def test_a_failed_start_with_no_remote_does_not_blame_origin(self):
+        self._git("remote", "remove", "origin")
+        (self.repo / "scratch.txt").write_text("dirty\n")
+        out = self.run_driver("--no-interview", "1")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn("origin", out.stderr)
 
     def test_plan_only_works_over_local_issues(self):
         out = self.run_driver("--plan-only", "1", "2", check=True)
@@ -758,8 +778,9 @@ class GitHubPrerequisites(PilotTestCase):
         self.assertIn("`gh` is not authenticated; run `gh auth login`.", out.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_a_local_tracker_does_not_ask_for_gh_authentication(self):
-        self.write_config({"test_command": "true", "tracker": "local"})
+    def test_a_project_that_uses_no_github_does_not_ask_for_gh_authentication(self):
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
         self._git("push", "-q", "origin", "main")
         gh = self.bindir / "gh"
         gh.write_text("#!/bin/sh\n[ \"$1\" = auth ] && exit 1\nexit 0\n")

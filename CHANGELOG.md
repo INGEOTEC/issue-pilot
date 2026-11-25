@@ -28,9 +28,15 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   hash before commenting, so the hash recorded for the item is the work's, not
   the comment's. With the defaults nothing changes beyond the spelling of the
   commands.
-- The driver requires `gh` on `PATH`, and authenticated, only when the tracker
-  is `github`; the configuration is checked before that, since the tracker is
-  read from it.
+- The configuration is checked before the driver looks for `gh`, since whether
+  `gh` is needed is read from it (see below).
+- issue-pilot starts in a repository with no remote: `base_sync.sh`,
+  `issue_base.py stamp` and `issue_base.py drift` take the local base branch as
+  the reference when there is no `origin`. `gh` is not needed, and is not
+  called to look up the default branch, when neither the tracker nor the landing
+  is GitHub's (`pilot_config.py uses-github`); the driver requires it only
+  then. `check` insists on `base_branch` in that case, since there is no
+  default to ask for. New `pilot_config.py` subcommands: `uses-github`, `remote`.
 
 ## [0.6.0] - 2026-11-18
 

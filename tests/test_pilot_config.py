@@ -158,8 +158,72 @@ class Configuration(PilotTestCase):
     def test_check_accepts_the_valid_values(self):
         for landing in ("pull_request", "merge", "push", "branch"):
             self.write_config({"test_command": "true", "tracker": "local",
-                               "issues_dir": "docs/tickets", "landing": landing})
+                               "issues_dir": "docs/tickets", "landing": landing,
+                               "base_branch": "main"})
             self.assertEqual(self.check().returncode, 0, landing)
+
+    def fake_gh_that_logs(self):
+        """A `gh` that records any call and fails; returns the log's path."""
+        log = self.repo.parent / "gh-calls.log"
+        gh = self.bindir / "gh"
+        gh.write_text("#!/bin/sh\necho \"$@\" >> %s\nexit 1\n" % log)
+        gh.chmod(0o755)
+        return log
+
+    def test_uses_github_for_the_three_configurations(self):
+        def uses():
+            return self.run_script("pilot_config.py", "uses-github").stdout.strip()
+        self.assertEqual(uses(), "yes")
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self.assertEqual(uses(), "yes")
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        self.assertEqual(uses(), "no")
+        self.write_config({"test_command": "true", "tracker": "github", "landing": "merge"})
+        self.assertEqual(uses(), "yes")
+
+    def test_remote_prints_origin_only_when_it_exists(self):
+        self.assertEqual(self.run_script("pilot_config.py", "remote").stdout, "origin\n")
+        self._git("remote", "remove", "origin")
+        out = self.run_script("pilot_config.py", "remote")
+        self.assertEqual((out.returncode, out.stdout), (0, ""))
+
+    def test_without_github_the_base_branch_never_calls_gh(self):
+        log = self.fake_gh_that_logs()
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "release"})
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "release")
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        self._git("checkout", "-q", "-b", "wip")
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "wip")
+        out = self.run_script("pilot_config.py", "default-branch")
+        self.assertEqual(out.stdout, "\n")
+        self.assertFalse(log.exists() and log.read_text())
+
+    def test_with_github_a_gh_that_cannot_answer_falls_back_to_head(self):
+        log = self.fake_gh_that_logs()
+        out = self.run_script("pilot_config.py", "base-branch")
+        self.assertEqual(out.stdout.strip(), "main")
+        self.assertTrue(log.read_text())
+
+    def test_check_wants_a_base_branch_when_there_is_no_github(self):
+        problem = "base_branch is not set, and without GitHub there is nothing to ask for a default"
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge"})
+        out = self.check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn(problem, out.stderr)
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "  "})
+        self.assertIn(problem, self.check().stderr)
+        self.write_config({"test_command": "true", "tracker": "local", "landing": "merge",
+                           "base_branch": "main"})
+        self.assertEqual(self.check().returncode, 0)
+        # With GitHub there is a default to ask for, so nothing is missing.
+        self.write_config({"test_command": "true"})
+        self.assertEqual(self.check().returncode, 0)
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self.assertEqual(self.check().returncode, 0)
 
     def test_detect_proposes_the_projects_own_test_command(self):
         (self.repo / "Makefile").write_text("test:\n\tpytest\n")

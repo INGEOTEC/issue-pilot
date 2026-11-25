@@ -47,6 +47,12 @@ def git(*args):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
+def reference(branch):
+    """What the base branch is measured against: `origin/<branch>`, or the local
+    branch itself in a repository with no remote, where there is nothing else."""
+    return f"origin/{branch}" if pilot_config.has_origin() else branch
+
+
 def drift_of(recorded, tip, branch):
     """How far the code has moved since `recorded`, towards `tip`."""
     if recorded is None:
@@ -69,21 +75,24 @@ def drift_of(recorded, tip, branch):
 
 def cmd_stamp(args):
     branch = pilot_config.resolve_base_branch()
-    tip = git("rev-parse", f"origin/{branch}")
+    ref = reference(branch)
+    tip = git("rev-parse", ref)
     head = git("rev-parse", "HEAD")
     if tip is None:
-        sys.exit(f"origin/{branch} is not known here; run base_sync.sh first")
+        sys.exit(f"{ref} is not known here; run base_sync.sh first")
     if head != tip:
-        sys.exit(f"HEAD is not at the tip of origin/{branch}; the stamp says the plan was "
+        sys.exit(f"HEAD is not at the tip of {ref}; the stamp says the plan was "
                  f"read there, so it has to be true. Run base_sync.sh first.")
     print(stamp(branch, tip))
 
 
 def cmd_drift(args):
     branch = pilot_config.resolve_base_branch()
-    tip = git("rev-parse", f"origin/{branch}")
+    remote = pilot_config.has_origin()
+    ref = reference(branch)
+    tip = git("rev-parse", ref)
     if tip is None:
-        sys.exit(f"origin/{branch} is not known here; run base_sync.sh first")
+        sys.exit(f"{ref} is not known here; run base_sync.sh first")
 
     report = []
     for n in args.issues:
@@ -98,7 +107,8 @@ def cmd_drift(args):
         return
 
     moved = 0
-    print(f"{branch} on origin is at {tip[:9]}")
+    print(f"{branch} on origin is at {tip[:9]}" if remote
+          else f"{branch} is at {tip[:9]} (no remote)")
     for e in report:
         n = e["issue"]
         if e["state"] == "current":

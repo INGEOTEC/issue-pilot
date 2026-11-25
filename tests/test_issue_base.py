@@ -105,5 +105,52 @@ class IssueBase(PilotTestCase):
         self.assertIn("#1  planned against main at %s -- the current tip" % tip[:9], out)
 
 
+class NoRemote(PilotTestCase):
+    def setUp(self):
+        super().setUp()
+        self.write_config({"test_command": "true", "tracker": "local"})
+        self._git("remote", "remove", "origin")
+        (self.repo / "issues").mkdir()
+
+    def write_local_issue(self, n, text):
+        (self.repo / "issues" / ("%04d-x.md" % n)).write_text(text)
+
+    def test_the_stamp_is_the_local_base_tip(self):
+        out = self.run_script("issue_base.py", "stamp").stdout.strip()
+        self.assertEqual(out, "_Planned against `main` at `%s`._" % self.git("rev-parse", "main"))
+
+    def test_the_stamp_refuses_when_head_is_not_at_the_base(self):
+        self._git("checkout", "-q", "-b", "feat/elsewhere")
+        (self.repo / "x.txt").write_text("x\n")
+        self._git("add", "x.txt")
+        self._git("commit", "-qm", "elsewhere")
+        out = self.run_script("issue_base.py", "stamp", check=False)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("HEAD is not at the tip of main", out.stderr)
+        self.assertNotIn("origin", out.stderr)
+
+    def test_drift_reports_current_and_behind_against_the_local_base(self):
+        old = self.git("rev-parse", "main")
+        self.write_local_issue(1, "# One\n\n_Planned against `main` at `%s`._\n" % old)
+        out = self.run_script("issue_base.py", "drift", "1").stdout
+        self.assertIn("main is at %s (no remote)" % old[:9], out)
+        self.assertIn("-- the current tip", out)
+
+        (self.repo / "later.txt").write_text("later\n")
+        self._git("add", "later.txt")
+        self._git("commit", "-qm", "later")
+        out = self.run_script("issue_base.py", "drift", "1").stdout
+        self.assertIn("1 commit(s) landed since", out)
+        self.assertIn("later.txt", out)
+
+    def test_drift_with_a_remote_still_says_origin(self):
+        self._git("remote", "add", "origin", str(self.origin))
+        self._git("push", "-q", "origin", "main")
+        self._git("fetch", "-q", "origin")
+        self.write_local_issue(1, "# One\n")
+        out = self.run_script("issue_base.py", "drift", "1").stdout
+        self.assertIn("main on origin is at", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,9 @@ against that commit and nothing else: not a feature branch that happened to be
 checked out, not a base branch that fell behind while something else was being
 worked on. A plan written against either is a plan for the wrong codebase.
 
+In a repository with no remote there is nothing to fetch: the local base branch
+is the reference, and is taken as it is.
+
 If it refuses, **stop** and repeat its message to the user: a dirty tree
 (suggest `git stash -u`, and `git stash pop` afterwards), a base branch with
 commits origin does not have, or an origin that cannot be reached. Do not fall
