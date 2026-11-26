@@ -17,7 +17,8 @@ import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
-SCRIPTS = HERE.parent / "scripts"
+ROOT = HERE.parent
+SCRIPTS = ROOT / "scripts"
 STUBS = HERE / "stubs"
 
 
@@ -70,6 +71,7 @@ class PilotTestCase(unittest.TestCase):
             "FAKE_GH_DEFAULT_BRANCH": "main",
             "FAKE_GH_PR_LOG": str(root / "gh-pr.jsonl"),
             "FAKE_GH_ISSUE_LOG": str(root / "gh-issues.jsonl"),
+            "FAKE_GH_RELEASE_LOG": str(root / "gh-releases.jsonl"),
             "FAKE_CLAUDE_LOG": str(self.claude_log),
             "FAKE_CLAUDE_COUNTER": str(root / "claude-counter"),
             "FAKE_NOTIFY_LOG": str(root / "notify-send.log"),

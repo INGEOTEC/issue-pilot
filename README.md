@@ -717,6 +717,9 @@ No dependencies beyond the standard library: the tests run the real scripts
 against a throwaway git repository, a fake `gh` and a fake `curl`, so what is
 tested is the command lines that actually ship.
 
+Releases are published by the `Release` workflow when a merged pull request
+changes the version; see [CONTRIBUTING.md](CONTRIBUTING.md#releasing).
+
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

@@ -56,3 +56,8 @@ jobs:
               sys.exit("missing front matter or description: " + ", ".join(bad))
           print("ok: every command file has a description")
           PY
+      - name: The version in plugin.json must have a CHANGELOG section
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+          python3 .github/scripts/release.py notes "$version" > /dev/null
+          echo "ok: CHANGELOG.md has a section for $version"

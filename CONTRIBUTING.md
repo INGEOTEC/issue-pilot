@@ -65,7 +65,19 @@ unattended session gets. Two habits pay off there:
 
 ## Releasing
 
-1. Update `CHANGELOG.md`.
-2. Bump `version` in `.claude-plugin/plugin.json`.
-3. Tag: `claude plugin tag .` creates `issue-pilot--vX.Y.Z` and checks that the
-   manifest and the marketplace entry agree.
+1. In the pull request, add a `## [X.Y.Z] - YYYY-MM-DD` section to
+   `CHANGELOG.md` and bump `version` in `.claude-plugin/plugin.json`. CI checks
+   that the two agree: a version without a changelog section fails the
+   `manifests` job.
+2. Merge. The `Release` workflow (`.github/workflows/release.yml`) tags `vX.Y.Z`
+   on the merge commit and publishes the GitHub release, titled
+   `issue-pilot X.Y.Z`, with that changelog section as its notes. Nothing is done
+   by hand.
+3. If a version ever ends up without a release (the workflow failed, or it
+   predates the workflow), go to Actions → Release → Run workflow and tick
+   "backfill": every version of `main` that has no tag is tagged on the commit
+   where it first appeared.
+
+The tool behind the workflow is `.github/scripts/release.py`. `notes`,
+`versions`, `pending` and `publish --dry-run` only read, and are safe to run in a
+checkout; `publish` without `--dry-run` creates tags and releases for real.

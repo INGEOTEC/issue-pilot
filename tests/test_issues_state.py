@@ -1059,14 +1059,11 @@ class IssuesGoThroughTheTracker(unittest.TestCase):
     def test_the_release_is_one_section_with_an_empty_unreleased_above_it(self):
         changelog = (SCRIPTS.parent / "CHANGELOG.md").read_text()
         version = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
-        self.assertEqual(version, "0.7.0")
-        self.assertEqual(changelog.count("## [0.7.0] - "), 1)
-        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.0]", 1)[0]
-        # Not empty while a later change of the same run waits to be released:
-        # issue 40 (prose) lands its entry here and the release issue turns it
-        # into the next section.
-        self.assertIn("### Changed", unreleased)
-        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[1-9])\]")
+        self.assertEqual(version, "0.7.1")
+        self.assertEqual(changelog.count("## [0.7.1] - "), 1)
+        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.1]", 1)[0]
+        self.assertEqual(unreleased.strip(), "")
+        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[2-9])\]")
 
     def test_plan_commits_and_pushes_the_new_issue(self):
         text = self.text("commands/plan.md")
