@@ -635,6 +635,10 @@ class FixRuns(Run):
         self.fix_add()
         self.reset_claude_log()
         before = self.state()["updated_at"]
+        # `updated_at` has one-second resolution: on a fast machine the driver
+        # rewrites the state within the second `fix-add` wrote it in, and the
+        # comparison below would see no change.
+        time.sleep(1.1)
 
         started = time.time()
         out = self.run_driver("--fix", "--detach", check=True)
