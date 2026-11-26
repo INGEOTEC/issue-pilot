@@ -1,5 +1,5 @@
 ---
-description: Implement a list of GitHub issues autonomously and open a single pull request
+description: Implement a list of issues autonomously, on one branch, ready for a single pull request or landing
 argument-hint: <issue numbers, e.g. 165 166 170>
 allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
@@ -273,7 +273,7 @@ refuses that outright, since it would silently forget which issues are already
 done. It is `/issue-pilot:fix <what you found>` instead: it records the
 finding on the run state as a plan item of its own and has the driver correct
 it on the same branch, retried and blocked exactly like an issue, with no
-GitHub issue to attach it to. Repeat it as many times as review turns anything
+issue to attach it to. Repeat it as many times as review turns anything
 up; `/issue-pilot:pr` comes after, once there is nothing left to fix.
 
 ## Phase 3 — pull request

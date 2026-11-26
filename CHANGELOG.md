@@ -6,6 +6,34 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-26
+
+### Added
+
+- The `Release` workflow (`.github/workflows/release.yml`) and the tool it runs,
+  `.github/scripts/release.py`. On every push to `main` it creates the annotated
+  tag `vX.Y.Z` and the GitHub release (titled `issue-pilot X.Y.Z`, with that
+  version's section of this changelog as its notes) for a version that has no
+  tag yet; run by hand with "backfill" it does the same for every earlier version
+  without one. The tool lives under `.github/`, so it is not installed with the
+  plugin.
+- A check in the `manifests` job of CI: the version in `plugin.json` must have a
+  section in this changelog, so a release cannot reach `main` without notes.
+
+### Changed
+
+- The releasing instructions in CONTRIBUTING.md: the tag and the release are
+  published by the `Release` workflow after the merge, not by hand
+  (`claude plugin tag .` created `issue-pilot--vX.Y.Z`, which is not the name of
+  any tag of this repository).
+- The plugin and marketplace descriptions (and the plugin's keywords), the
+  description of `/issue-pilot:run` and the README now say that issue-pilot
+  works with or without GitHub, instead of describing a GitHub-only tool. The
+  README has a "Where it works" overview of the supported kinds of repository,
+  and the sentences that presented a pull request or a GitHub issue as the only
+  possibility (review fixes, blocking, `/issue-pilot:fix`) now cover a run that
+  lands without one.
+
 ## [0.7.0] - 2026-11-25
 
 issue-pilot without GitHub. A project that cannot be on GitHub and has a git of

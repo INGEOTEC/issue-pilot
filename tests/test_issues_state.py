@@ -1059,16 +1059,60 @@ class IssuesGoThroughTheTracker(unittest.TestCase):
     def test_the_release_is_one_section_with_an_empty_unreleased_above_it(self):
         changelog = (SCRIPTS.parent / "CHANGELOG.md").read_text()
         version = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
-        self.assertEqual(version, "0.7.0")
-        self.assertEqual(changelog.count("## [0.7.0] - "), 1)
-        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.0]", 1)[0]
+        self.assertEqual(version, "0.7.1")
+        self.assertEqual(changelog.count("## [0.7.1] - "), 1)
+        unreleased = changelog.split("## [Unreleased]", 1)[1].split("## [0.7.1]", 1)[0]
         self.assertEqual(unreleased.strip(), "")
-        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[1-9])\]")
+        self.assertNotRegex(changelog, r"\[0\.(6\.[1-9]|7\.[2-9])\]")
 
     def test_plan_commits_and_pushes_the_new_issue(self):
         text = self.text("commands/plan.md")
         self.assertIn("commit --push", text)
         self.assertIn("Add issue <n>: <title>", text)
+
+
+class WorksWithOrWithoutGithubText(unittest.TestCase):
+    """The text a person meets first does not describe a GitHub-only tool."""
+
+    ROOT = SCRIPTS.parent
+
+    def read(self, name):
+        return (self.ROOT / name).read_text()
+
+    def test_plugin_and_marketplace_carry_the_same_description(self):
+        plugin = json.loads(self.read(".claude-plugin/plugin.json"))
+        market = json.loads(self.read(".claude-plugin/marketplace.json"))
+        entry = [p for p in market["plugins"] if p["name"] == "issue-pilot"][0]
+        self.assertEqual(plugin["description"], entry["description"])
+        self.assertNotIn("GitHub issues into", plugin["description"])
+        self.assertNotIn("list of GitHub issues", plugin["description"])
+        self.assertIn("without it", plugin["description"])
+        self.assertNotIn("GitHub issues", market["description"])
+        for keyword in ("git", "local-issues", "overleaf"):
+            self.assertIn(keyword, plugin["keywords"])
+
+    def test_readme_has_where_it_works_with_the_four_cases(self):
+        text = self.read("README.md")
+        self.assertIn("\n## Where it works\n", text)
+        self.assertLess(text.index("## Where it works"), text.index("\n## Install\n"))
+        section = text.split("## Where it works", 1)[1].split("\n## ", 1)[0]
+        rows = [line for line in section.splitlines() if line.startswith("| ")]
+        # the header and the four cases (the separator starts with `|-`)
+        self.assertEqual(len(rows), 5, rows)
+        for case, row in zip(("GitHub", "server of your own", "Overleaf", "No remote"), rows[1:]):
+            self.assertIn(case, row)
+        self.assertIn("(#without-github)", section)
+        self.assertIn("\n## Without GitHub\n", text)
+
+    def test_no_text_presents_github_as_the_only_way(self):
+        phrases = ("list of GitHub issues", "not a GitHub issue", "no GitHub comment")
+        for name in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json",
+                     "commands/run.md", "commands/fix.md", "commands/plan.md",
+                     "commands/pr.md", "commands/close.md", "commands/init.md",
+                     "scripts/prompts/one.md", "README.md", "CONTRIBUTING.md"):
+            text = self.read(name)
+            for phrase in phrases:
+                self.assertNotIn(phrase, text, name)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,9 @@ the merge is done with git inside the bare origin of the current repository.
 lines; `create` prints a URL numbered 100 + the creates already logged) and
 `gh issue list` prints $FAKE_GH_ISSUE_LIST, a JSON array, `[]` by default.
 
+`gh release create` is recorded in $FAKE_GH_RELEASE_LOG (JSON lines, with the
+contents of --notes-file) and fails when $FAKE_GH_RELEASE_FAIL is set.
+
 `gh issue view <n>` is served from $FAKE_GH_ISSUES, a JSON object mapping issue
 number to payload.  Anything not faked is an error, loudly, so a test that
 reaches for an unexpected call fails instead of silently passing.
@@ -115,6 +118,20 @@ if argv[:2] == ["pr", "merge"]:
     git("-C", origin, "update-ref", "refs/heads/" + entry["base"], sha)
     if "--delete-branch" in argv:
         git("-C", origin, "update-ref", "-d", "refs/heads/" + entry["head"])
+    sys.exit(0)
+
+if argv[:2] == ["release", "create"]:
+    path = os.environ.get("FAKE_GH_RELEASE_LOG")
+    if not path:
+        sys.stderr.write("fake gh: FAKE_GH_RELEASE_LOG is not set\n")
+        sys.exit(2)
+    if os.environ.get("FAKE_GH_RELEASE_FAIL"):
+        sys.stderr.write("release could not be created\n")
+        sys.exit(1)
+    notes_file = option("--notes-file")
+    with open(path, "a") as out:
+        out.write(json.dumps({"cmd": "release-create", "args": argv[2:],
+                              "notes": open(notes_file).read() if notes_file else None}) + "\n")
     sys.exit(0)
 
 if argv[:1] == ["auth"]:

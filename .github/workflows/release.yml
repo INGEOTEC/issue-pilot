@@ -1,0 +1,47 @@
+# Publishes the tag and the GitHub release of every version that has none.
+#
+# It asks "which versions of main have no tag?" instead of diffing the version
+# between the two ends of a push: the answer is the same on a merge that bumps
+# the version, and it is also right when this workflow is re-run, when two
+# merges land close together, or when a run was skipped. A missing tag is the
+# actual thing to fix.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: Also release every earlier version that has no tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # every commit and every tag: versions are found in the history
+      - name: Identify the tagger
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Publish what has no tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKFILL: ${{ inputs.backfill }}
+        run: |
+          if [[ "$BACKFILL" == "true" ]]; then
+            python3 .github/scripts/release.py publish --all
+          else
+            python3 .github/scripts/release.py publish
+          fi
