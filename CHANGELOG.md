@@ -6,6 +6,16 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The plugin and marketplace descriptions (and the plugin's keywords), the
+  description of `/issue-pilot:run` and the README now say that issue-pilot
+  works with or without GitHub, instead of describing a GitHub-only tool. The
+  README has a "Where it works" overview of the supported kinds of repository,
+  and the sentences that presented a pull request or a GitHub issue as the only
+  possibility (review fixes, blocking, `/issue-pilot:fix`) now cover a run that
+  lands without one.
+
 ## [0.7.0] - 2026-11-25
 
 issue-pilot without GitHub. A project that cannot be on GitHub and has a git of

@@ -1,13 +1,30 @@
 # issue-pilot
 
-Turn a list of issues into one reviewed pull request, unattended — on GitHub,
-or without it (see [Without GitHub](#without-github)).
+Turn a list of issues into one reviewed branch, unattended — on GitHub (ending
+in a pull request), or without it (see [Without GitHub](#without-github)).
 
 `issue-pilot` is a [Claude Code](https://claude.com/claude-code) plugin for a
 specific way of working: you write down what you want as an issue (on GitHub,
 or a markdown file in the project), and
 then a Claude Code run implements it — reading the issue, writing the code and
 the tests, committing, commenting on the issue, and moving on to the next one.
+
+## Where it works
+
+issue-pilot needs a git repository and nothing else; which of the cases below
+you are in decides where the issues live and how a finished run lands.
+
+| The project's git | Where issues live (`tracker`) | How a run lands (`landing`) | Needs `gh` |
+|---|---|---|---|
+| GitHub | `github` | `pull_request` | yes |
+| A server of your own (Gitea, GitLab, bare ssh) | `local` | `merge`, `push` or `branch` | no |
+| Overleaf's git (a single branch) | `local` | `merge` | no |
+| No remote at all | `local` | `merge` or `branch` | no |
+
+The two settings are independent, so mixed setups exist (GitHub issues with
+`landing: merge`, local issues with a GitHub pull request); `gh` is needed
+whenever either one is GitHub's. `/issue-pilot:init` detects the case and asks.
+The details are in [Without GitHub](#without-github).
 
 Doing that across several issues runs into three problems that no amount of
 prompting fixes. issue-pilot is the three answers.
@@ -296,8 +313,9 @@ Never one branch per issue, and never a pull request per issue.
 **And you stay on it.** When the run finishes — and after a `--resume` or a
 `--fix` — the driver leaves the run branch checked out: the next step is
 reviewing the work, and that is where it is. `/issue-pilot:pr` is what goes back
-to the base branch, after opening the pull request (with `--pr`, the driver only
-does so once the pull request is recorded; a failed one leaves you on the work),
+to the base branch, after opening the pull request or landing the run (with
+`--pr`, the driver only does so once either is recorded; a failed one leaves you
+on the work),
 and `/issue-pilot:close` pulls the merge and deletes the local run branch once
 everything on it is on origin. A run that stops early — a blocker, a session
 that kept dying — stays on its branch too, where the unfinished work is.
@@ -323,7 +341,8 @@ working tree byte-identical: more sessions will not help.
 
 **Blocking is explicit.** A session that finds a real blocker calls
 `issues_state.py block`. *That* stops the run, without retries, with the commits
-of the issues that did finish left intact and no pull request opened. Ending a
+of the issues that did finish left intact, nothing landed and no pull request
+opened. Ending a
 turn quietly is not a way to give up.
 
 **Resuming.** `issues_run.sh --resume` reopens the blocked issue and hands it out
@@ -332,21 +351,21 @@ run instead of looping. It does not ask the questions again: the answers
 are already in the state.
 
 **Review fixes.** Between a finished run and `/issue-pilot:pr` there is
-usually a review of the branch. A finding from it is not a GitHub issue — it
+usually a review of the branch. A finding from it is not an issue of its own — it
 is not necessarily about any one of the run's issues, and pinning it on one
 arbitrarily loses the rest — so `/issue-pilot:fix <what you found>` records it
 as a plan item of its own (`fix-1`, `fix-2`, ...) directly in the run state,
 and `issues_run.sh --fix` applies it on the same branch, retried and blocked
 exactly like an issue. It names the issues it corrects when that is obvious
 from the review, and starts a clean conversation when it does not — the same
-deterministic rule `issues_plan.py` uses for issues. It goes into the same
-pull request, in its own section, with no `Closes` (there is no issue to
-close). A finished run's state refuses to be started over with the same issue
+deterministic rule `issues_plan.py` uses for issues. It lands with the run
+(in the same pull request, in its own section, with no `Closes`, when the run
+ends in one; there is no issue to close). A finished run's state refuses to be started over with the same issue
 list precisely so this is the way back in, not a rerun.
 
 `/issue-pilot:fix` refuses, before the model sees it, when the repository has
-no finished run waiting for a fix — no run at all, or one whose pull request is
-already open — and hands back `/issue-pilot:plan <your text>`, which is nearly
+no finished run waiting for a fix — no run at all, or one that already has a
+pull request open or has landed — and hands back `/issue-pilot:plan <your text>`, which is nearly
 always what was meant.
 
 **Logs.** The driver's own output goes to
@@ -501,7 +520,7 @@ Every setting can be overridden for a single run by an environment variable
 | `/issue-pilot:run <n>...` | Asks you everything the run needs, then starts it in the background and tells the conversation when it stops (`"watch": false` turns that off). |
 | `/issue-pilot:status` | Answers at once while a run is going (is it moving, or paused or halted by the usage guard?), and gives the full report, with the usage windows, once it has stopped. |
 | `/issue-pilot:usage` | A live reading of the usage windows and what the usage guard would do with it. Read-only. |
-| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). Refuses, and suggests `/issue-pilot:plan`, when there is no run, or its pull request is already open. |
+| `/issue-pilot:fix <finding>` | Records a review finding on a finished run and has the driver correct it on the same branch, and tells the conversation when it stops (`"watch": false` turns that off). Refuses, and suggests `/issue-pilot:plan`, when there is no run, or it already has a pull request open or has landed. |
 | `/issue-pilot:pr` | Opens the single pull request, if every issue is done, or lands the run the way `landing` says. |
 | `/issue-pilot:close` | Closes the issues by hand once the work is merged, when nothing closed them already. |
 
@@ -514,7 +533,7 @@ scripts/issues_run.sh --notes-file notes.txt 165  # answers gathered elsewhere
 scripts/issues_run.sh --no-interview 165          # no questions at all
 scripts/issues_run.sh --detach --no-interview 165 # run in the background
 scripts/issues_run.sh --plan-only 165 166 170     # show the plan, touch nothing
-scripts/issues_run.sh --pr 165 166                # open the pull request too
+scripts/issues_run.sh --pr 165 166                # finish the run too (pull request or landing)
 scripts/issues_run.sh --resume                    # retry the blocked issue
 scripts/issues_run.sh --fix                       # apply a pending review fix (issues_state.py fix-add)
 ```

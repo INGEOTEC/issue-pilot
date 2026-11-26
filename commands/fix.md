@@ -9,7 +9,7 @@ Record a review fix for: $ARGUMENTS
 This is the step between a finished run and `/issue-pilot:pr`: you reviewed the
 branch, found something wrong or worth improving, and want it corrected on that
 same branch, without pinning it on one of the original issues (it may not fit
-any of them, or it may touch several). A fix is not a GitHub issue — it is
+any of them, or it may touch several). A fix is not an issue in the tracker — it is
 recorded in the run state as a plan item of its own (`fix-<k>`) and applied by
 the same driver that implemented the issues.
 

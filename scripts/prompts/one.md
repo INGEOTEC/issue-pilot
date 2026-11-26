@@ -127,7 +127,7 @@ So:
 
 ## When the item is a review fix (`fix-<k>`)
 
-A review fix is not a GitHub issue: it is a finding recorded on the run state by
+A review fix is not an issue in the tracker: it is a finding recorded on the run state by
 `/issue-pilot:fix`, after the run's issues were already implemented. When
 `issues_state.py next` reports an id of this shape, apply these differences to
 the steps above; everything else — the autonomy rules, checking what is already
@@ -151,7 +151,7 @@ done before redoing it, tests green before any commit — applies unchanged:
   `issues_state.py done fix-<k> --commit <hash>`, the hash of the fix's own
   commit, not of the comment's.
 - **Step 7 (blocking).** `issues_state.py block fix-<k> --reason '...'`, same as
-  for an issue — no GitHub comment, since a fix that names no issue has nowhere
+  for an issue — no comment, since a fix that names no issue has nowhere
   to put one.
 
 Do not open a pull request here, and do not start any other issue: the driver
